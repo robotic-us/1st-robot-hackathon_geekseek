@@ -40,6 +40,7 @@
 |---|---|---|
 | Jetson·iPad·폰 동일 네트워크 확보 | 현장 Wi-Fi/핫스팟으로 Safari 풀스크린 접속 테스트 | [work/D-kiosk-web-server](../work/D-kiosk-web-server/README.md) |
 | 제품 인식 범위 | 손 키포인트 근접도로 단순화 vs 별도 객체 탐지 — §8 파이프라인 자리잡은 뒤 결정 | [work/B-perception-skeleton](../work/B-perception-skeleton/README.md) |
+| 2단계 개인화 인사말 VLM — 최종 모델 | 현재 `vlm.py`의 `ClaudeGreeter`(Anthropic API)는 파이프라인(트리거 타이밍·프롬프트·fail_open·SSE 반영) 검증용 프로토타입. 실제로는 현장 Wi-Fi 의존 피하려고 로컬 VLM(예: Qwen3 MoE 30B대) on-device를 검토 중인데, 이 노트북에서는 못 돌려보고 Jetson에서 직접 테스트해봐야 함. `Greeter` 프로토콜만 맞추면 교체는 `app.py` 한 줄(`ClaudeGreeter()` → `LocalVlmGreeter(...)`) | Jetson 접근 대기 중 |
 
 ## 새 결정을 추가할 때
 한 줄로: **무엇을 / 왜 / 언제(날짜) / 누가**. 근거가 대화뿐이면 "팀 확인(YYYY-MM-DD)"이라고 적고,

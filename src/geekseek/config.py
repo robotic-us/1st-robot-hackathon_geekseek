@@ -15,10 +15,13 @@ class RuntimeConfig:
     capture_seconds: float = 0.2
     person_sensor: str = "fake"
     camera_index: int = 0
+    camera_fps: float = 15.0
     sense_interval: float = 0.2
     greeting_seconds: float = 3.0
     preview_seconds: float = 3.0
     farewell_seconds: float = 4.0
+    vlm_enabled: bool = False
+    debug_window: bool = False
 
 
 @dataclass(frozen=True)

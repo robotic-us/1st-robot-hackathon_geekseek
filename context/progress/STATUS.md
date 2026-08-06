@@ -14,10 +14,17 @@ BOOTING/READY/REPOSITIONING/GUIDING/VERIFYING/CAPTURING/REVIEWING 구조는 폐�
 사람 접근(`waiting→greeting`)·정위치(`guiding→capturing`)를 자동 판단하게 했다. 로봇은 5단계
 (버스트 촬영)에서만 실제로 움직이므로, `robot: fake`로 설정하면 RViz 없이도 1~4단계(웹캠 감지 +
 iPad UI)를 노트북 하나로 검증할 수 있다(`config/local-demo-no-robot.yaml`). 엔드이펙터 폰 연동(아이폰
-Safari 웹앱, `WebAppCapture`)은 새 상태 머신에도 그대로 재사용. `pytest tests/`(29개) 전부 통과,
-`python3 -m geekseek --demo`로 8단계 전체 헤드리스 왕복 확인.
-프런트엔드는 Codex가 `web/face-mock.html`/`guide-mock.html`(8단계 비주얼 목업)을 완성했고, 지금은
-그걸 실제 SSE(`/events`)와 새 API(`/api/capture-started` 등)에 연결하는 작업을 진행 중이다.
+Safari 웹앱, `WebAppCapture`)은 새 상태 머신에도 그대로 재사용.
+프런트엔드는 Codex가 `web/face-mock.html`/`guide-mock.html`(8단계 비주얼 목업)을 완성하고 실제
+SSE(`/events`)·새 API에 연결까지 끝냈다 — 실제 서버로 8단계 전부 + 에러 상태 + `?debug=1`까지
+렌더링해서 검증 완료. 이어서 3가지를 추가했다: (1) `/debug/webcam` — 웹캠 인식(스켈레톤+상태값)을
+실시간으로 볼 수 있는 디버그 MJPEG 스트림, (2) `/live/camera` — 디버그 오버레이 없는 깨끗한
+셀피미러 웹캠 스트림, `guide-mock.html`의 4·5단계 카메라 프리뷰 자리에 실제로 꽂아넣음, (3)
+`vlm.py`의 `ClaudeGreeter` — 2단계(greeting) 진입 시점 웹캠 프레임으로 Claude(`claude-opus-5`,
+thinking 끔·effort low)를 백그라운드 호출해 개인화 인사말(`context.greeting_line`)을 만듦, 실패해도
+기본 문구로 자연스럽게 폴백(`runtime.vlm_enabled: false`가 기본, 키 필요). Codex는 지금 음성(TTS,
+Web Speech API, iPad1 전용) 작업 중 — 끝나면 `greeting_line`을 mock.js 캡션에 반영하는 작업이 남음.
+`pytest tests/`(30개) 전부 통과.
 
 ## 트랙별 상태
 
@@ -35,10 +42,11 @@ Safari 웹앱, `WebAppCapture`)은 새 상태 머신에도 그대로 재사용. 
 없음.
 
 ## 다음 체크인 때 확인할 것
-- Codex의 `face-mock.html`/`guide-mock.html` SSE 실연동이 끝났는지 (`/events` 자동 진행, 캐러셀→template_id,
-  실제 사진 기반 슬라이드쇼/버스트 카운터, `?debug=1` 게이팅)
+- Codex 음성(TTS) 작업 완료 — `context.greeting_line`을 mock.js 캡션에 반영(2단계만, 없으면 기본
+  캡션 유지)하는 마무리 작업 필요
+- 2단계 인사말 VLM: 지금 `ClaudeGreeter`(Anthropic API)는 파이프라인 검증용 프로토타입일 뿐 — 실제
+  타겟은 로컬 VLM(Jetson, 현장 Wi-Fi 비의존). Jetson 접근되면 `Greeter` 프로토콜에 맞춰
+  `LocalVlmGreeter` 만들어서 교체할 것 (`../knowledge/decisions.md` 참고)
 - 실제 iPad 2대에서 `/face`, `/guide`, SSE 동기화를 확인할 것
-- `config/local-demo-no-robot.yaml`(robot: fake)로 1~4단계(웹캠 감지+iPad UI)만 먼저 실기기 없이
-  검증해볼 것 — 되면 `local-demo.yaml`(robot: rviz)로 전체 풀 런
-- D의 MJPEG 영상 스트림을 iPad 2 `viewfinder`에 연결할 것
-- 트랙 A가 sim에서라도 `play()` 왕복에 성공했는지
+- 트랙 A(로봇 실물, phorce) — CAD 출력 대기 중이라 보류. 나올 때까지는 RViz 시뮬레이션까지만
+- 구도별 정렬 세분화(지금은 "화면 중앙" 하나로만 판단)

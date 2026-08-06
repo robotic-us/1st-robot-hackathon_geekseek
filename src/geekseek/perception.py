@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "pose_landmarker_lite.task"
+LOGGER = logging.getLogger(__name__)
+PERFORMANCE_LOGGER = logging.getLogger("uvicorn.error")
 
 
 @dataclass(frozen=True)
@@ -14,10 +18,67 @@ class PersonSignal:
     size_ratio: float = 0.0  # visible-landmark bbox area / frame area, 0..1
     center_x: float = 0.5  # normalized 0..1, bbox center
     center_y: float = 0.5
+    hand_raised: bool = False  # 손목이 어깨보다 위에 있는 사람이 한 명이라도 있으면 True
 
 
 class PersonSensor(Protocol):
     def sense(self, frame: object) -> PersonSignal: ...
+
+
+# MediaPipe PoseLandmarker indices (BlazePose 33-point topology).
+_LEFT_SHOULDER, _RIGHT_SHOULDER = 11, 12
+_LEFT_WRIST, _RIGHT_WRIST = 15, 16
+
+
+def _any_hand_raised(landmarks_list: list, min_visibility: float, margin: float = 0.05) -> bool:
+    """True if, for any detected person, a wrist sits clearly above (smaller
+    y than) its shoulder — the "hand up, I'm ready" signal before the burst
+    countdown starts."""
+    for landmarks in landmarks_list:
+        for shoulder_index, wrist_index in ((_LEFT_SHOULDER, _LEFT_WRIST), (_RIGHT_SHOULDER, _RIGHT_WRIST)):
+            shoulder, wrist = landmarks[shoulder_index], landmarks[wrist_index]
+            if shoulder.visibility < min_visibility or wrist.visibility < min_visibility:
+                continue
+            if wrist.y < shoulder.y - margin:
+                return True
+    return False
+
+
+def create_pose_landmarker(
+    model_path: Path = MODEL_PATH,
+    max_people: int = 2,
+    min_detection_confidence: float = 0.5,
+    prefer_gpu: bool = True,
+) -> tuple[object, object, str]:
+    """Create a two-person pose landmarker, preferring the GPU delegate.
+
+    Some MediaPipe Python wheels expose the GPU enum but are compiled with GPU
+    calculators disabled. Keep the kiosk usable on those machines by logging
+    the exact failure and retrying with the explicit CPU delegate.
+    """
+    import mediapipe as mp
+    from mediapipe.tasks.python import BaseOptions
+    from mediapipe.tasks.python import vision
+
+    delegates = [BaseOptions.Delegate.GPU, BaseOptions.Delegate.CPU] if prefer_gpu else [BaseOptions.Delegate.CPU]
+    for delegate in delegates:
+        options = vision.PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=str(model_path), delegate=delegate),
+            running_mode=vision.RunningMode.IMAGE,
+            num_poses=max_people,
+            min_pose_detection_confidence=min_detection_confidence,
+        )
+        try:
+            landmarker = vision.PoseLandmarker.create_from_options(options)
+        except (NotImplementedError, RuntimeError) as exc:
+            if delegate is BaseOptions.Delegate.GPU:
+                LOGGER.warning("MediaPipe GPU delegate unavailable; falling back to CPU: %s", exc)
+                continue
+            raise
+        delegate_name = delegate.name.lower()
+        LOGGER.info("MediaPipe pose landmarker initialized: delegate=%s, max_people=%d", delegate_name, max_people)
+        return mp, landmarker, delegate_name
+    raise RuntimeError("could not initialize MediaPipe pose landmarker")
 
 
 class FakePersonSensor:
@@ -47,43 +108,70 @@ class MediaPipePersonSensor:
         min_detection_confidence: float = 0.5,
         min_landmark_visibility: float = 0.5,
         min_visible_landmarks: int = 8,
+        max_people: int = 2,
     ) -> None:
-        import mediapipe as mp
-        from mediapipe.tasks.python import BaseOptions
         from mediapipe.tasks.python import vision
 
-        options = vision.PoseLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(model_path)),
-            running_mode=vision.RunningMode.IMAGE,
-            num_poses=1,
-            min_pose_detection_confidence=min_detection_confidence,
+        self._mp, self._landmarker, self.delegate_name = create_pose_landmarker(
+            model_path=model_path,
+            max_people=max_people,
+            min_detection_confidence=min_detection_confidence,
         )
-        self._mp = mp
-        self._landmarker = vision.PoseLandmarker.create_from_options(options)
         self._min_landmark_visibility = min_landmark_visibility
         self._min_visible_landmarks = min_visible_landmarks
         self._connections = vision.PoseLandmarksConnections().POSE_LANDMARKS
-        self._last_landmarks: list | None = None
+        self._last_landmarks_list: list = []
+        self.loop_fps = 0.0
+        self.inference_fps = 0.0
+        self._last_sense_at: float | None = None
+        self._next_performance_log = time.perf_counter() + 5.0
 
     def sense(self, frame: object) -> PersonSignal:
+        started = time.perf_counter()
+        if self._last_sense_at is not None:
+            instant_loop_fps = 1.0 / max(started - self._last_sense_at, 1e-6)
+            self.loop_fps = instant_loop_fps if self.loop_fps == 0.0 else self.loop_fps * 0.9 + instant_loop_fps * 0.1
+        self._last_sense_at = started
         rgb = frame[:, :, ::-1]  # cv2 gives BGR; mediapipe wants RGB
         mp_image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         result = self._landmarker.detect(mp_image)
+        instant_inference_fps = 1.0 / max(time.perf_counter() - started, 1e-6)
+        self.inference_fps = (
+            instant_inference_fps
+            if self.inference_fps == 0.0
+            else self.inference_fps * 0.9 + instant_inference_fps * 0.1
+        )
+        if started >= self._next_performance_log:
+            PERFORMANCE_LOGGER.info(
+                "MediaPipe pose performance: delegate=%s, loop_fps=%.1f, inference_fps=%.1f",
+                self.delegate_name,
+                self.loop_fps,
+                self.inference_fps,
+            )
+            self._next_performance_log = started + 5.0
         if not result.pose_landmarks:
-            self._last_landmarks = None
+            self._last_landmarks_list = []
             return PersonSignal(detected=False)
+
+        self._last_landmarks_list = list(result.pose_landmarks)
 
         # Low-confidence poses can place unseen joints anywhere, including
         # far outside the frame (x/y outside [0, 1]) — drop those landmarks
         # and require enough confidently-visible ones left to trust the box.
-        landmarks = result.pose_landmarks[0]
-        self._last_landmarks = landmarks
-        visible = [point for point in landmarks if point.visibility >= self._min_landmark_visibility]
-        if len(visible) < self._min_visible_landmarks:
+        # Pool every visible landmark across every detected person into one
+        # union bbox — "두 분" approaching/positioned is a single group signal,
+        # not per-person.
+        xs: list[float] = []
+        ys: list[float] = []
+        for landmarks in result.pose_landmarks:
+            for point in landmarks:
+                if point.visibility >= self._min_landmark_visibility:
+                    xs.append(min(1.0, max(0.0, point.x)))
+                    ys.append(min(1.0, max(0.0, point.y)))
+
+        if len(xs) < self._min_visible_landmarks:
             return PersonSignal(detected=False)
 
-        xs = [min(1.0, max(0.0, point.x)) for point in visible]
-        ys = [min(1.0, max(0.0, point.y)) for point in visible]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
         return PersonSignal(
@@ -91,22 +179,24 @@ class MediaPipePersonSensor:
             size_ratio=max(0.0, max_x - min_x) * max(0.0, max_y - min_y),
             center_x=(min_x + max_x) / 2,
             center_y=(min_y + max_y) / 2,
+            hand_raised=_any_hand_raised(result.pose_landmarks, self._min_landmark_visibility),
         )
 
     def annotate_jpeg(self, frame: object, signal: PersonSignal, approaching: bool, positioned: bool) -> bytes:
-        """Draws the skeleton (from the most recent sense() call) plus a status
-        readout onto a copy of frame, for a live debug view — never called from
-        the hot sense() path, only by the coordinator's debug stream."""
+        """Draws every detected person's skeleton (from the most recent
+        sense() call) plus a status readout onto a copy of frame, for a live
+        debug view — never called from the hot sense() path, only by the
+        coordinator's debug stream."""
         import cv2
 
         annotated = frame.copy()
         height, width = annotated.shape[:2]
-        if self._last_landmarks is not None:
+        for landmarks in self._last_landmarks_list:
             points = [
                 (int(p.x * width), int(p.y * height))
                 if p.visibility >= self._min_landmark_visibility
                 else None
-                for p in self._last_landmarks
+                for p in landmarks
             ]
             for connection in self._connections:
                 start, end = points[connection.start], points[connection.end]
@@ -117,8 +207,9 @@ class MediaPipePersonSensor:
                     cv2.circle(annotated, point, 4, (60, 140, 255), -1)
 
         lines = [
-            f"detected={signal.detected}  size_ratio={signal.size_ratio:.3f}",
-            f"center=({signal.center_x:.2f}, {signal.center_y:.2f})",
+            f"detected={signal.detected}  people={len(self._last_landmarks_list)}  delegate={self.delegate_name}",
+            f"loop={self.loop_fps:.1f}fps  inference={self.inference_fps:.1f}fps",
+            f"size_ratio={signal.size_ratio:.3f}  center=({signal.center_x:.2f}, {signal.center_y:.2f})",
             f"approaching={approaching}  positioned={positioned}",
         ]
         for index, line in enumerate(lines):
@@ -148,9 +239,11 @@ class WebcamFrameSource:
     """Grabs frames from a cv2 webcam on a background thread so the async
     sense loop (Coordinator) never blocks the event loop on cv2's blocking
     capture.read(). Call the instance to get the most recent frame (or None
-    before the first frame arrives)."""
+    before the first frame arrives). Capped at target_fps — reading faster
+    than the sense loop (5Hz by default) or the MJPEG streams (~6.7Hz) can
+    consume just wastes a full CPU core on frames nobody looks at."""
 
-    def __init__(self, camera_index: int = 0) -> None:
+    def __init__(self, camera_index: int = 0, target_fps: float = 15.0) -> None:
         import cv2
 
         self._capture = cv2.VideoCapture(camera_index)
@@ -158,14 +251,21 @@ class WebcamFrameSource:
             raise RuntimeError(f"could not open camera index {camera_index}")
         self._latest: object | None = None
         self._running = True
+        self._frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
     def _loop(self) -> None:
+        import time
+
         while self._running:
+            started = time.monotonic()
             ok, frame = self._capture.read()
             if ok:
                 self._latest = frame
+            remaining = self._frame_interval - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
 
     def __call__(self) -> object | None:
         return self._latest
@@ -176,9 +276,23 @@ class WebcamFrameSource:
         self._capture.release()
 
 
+def encode_jpeg(frame: object) -> bytes:
+    """Plain JPEG encode, no overlay/mirror — for handing a frame to something
+    outside cv2's world (e.g. the VLM greeter)."""
+    import cv2
+
+    ok, buffer = cv2.imencode(".jpg", frame)
+    return buffer.tobytes() if ok else b""
+
+
 def is_approaching(signal: PersonSignal, size_threshold: float = 0.12) -> bool:
     """시나리오 2단계: skeleton이 일정 크기 이상이면 접근으로 판단."""
     return signal.detected and signal.size_ratio >= size_threshold
+
+
+def is_ready_signal(signal: PersonSignal) -> bool:
+    """시나리오 5단계: 카운트다운 시작 전, 손을 들어 준비됐음을 알리는 신호."""
+    return signal.detected and signal.hand_raised
 
 
 def is_positioned(

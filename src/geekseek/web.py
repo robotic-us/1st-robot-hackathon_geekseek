@@ -28,6 +28,16 @@ def create_app(coordinator: Coordinator) -> FastAPI:
 
     app = FastAPI(title="Geekseek Kiosk", lifespan=lifespan)
     app.state.coordinator = coordinator
+
+    @app.middleware("http")
+    async def no_cache_static(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            # Dev iterates on mock.js/mock.css constantly — a stale cached copy
+            # in an already-open kiosk tab looks exactly like a regression.
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
     app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 
     if isinstance(coordinator.capture, WebAppCapture):
@@ -136,6 +146,13 @@ def create_app(coordinator: Coordinator) -> FastAPI:
     @app.post("/api/reset")
     async def reset() -> dict[str, object]:
         return await emit(EventType.RESET_REQUESTED, {State.ERROR})
+
+    @app.post("/api/debug/position-reached", include_in_schema=False)
+    async def debug_position_reached() -> dict[str, object]:
+        # Forces guiding->capturing without waiting for the webcam to see
+        # someone centered — handy for testing the countdown/burst UI without
+        # a person in front of the camera.
+        return await emit(EventType.POSITION_REACHED, {State.GUIDING})
 
     @app.get("/events")
     async def events() -> StreamingResponse:

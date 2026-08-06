@@ -15,6 +15,7 @@ class WebTests(unittest.TestCase):
             FakeRobot(0),
             FakeCapture(0),
             greeting_seconds=0.05,
+            countdown_seconds=0,
             preview_seconds=0.05,
             farewell_seconds=0.05,
         )

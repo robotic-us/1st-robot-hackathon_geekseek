@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 from .app import build_coordinator
-from .config import load_config
+from .config import AppConfig, load_config
 from .workflow import EventType, State
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 
 
 async def run_demo(config_path: str) -> None:
@@ -34,6 +39,17 @@ async def run_demo(config_path: str) -> None:
     await coordinator.stop()
 
 
+def _launch_debug_window(config: AppConfig) -> subprocess.Popen | None:
+    script = SCRIPTS_DIR / "mission_control.py"
+    scheme = "https" if config.web.ssl_certfile else "http"
+    base_url = f"{scheme}://127.0.0.1:{config.web.port}"
+    try:
+        return subprocess.Popen([sys.executable, str(script), base_url])
+    except OSError as exc:
+        print(f"[geekseek] could not launch debug window: {exc}")
+        return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Geekseek camera robot runtime")
     parser.add_argument("--config", default="config/dev.yaml")
@@ -48,14 +64,19 @@ def main() -> None:
     from .web import create_app
 
     config = load_config(args.config)
-    uvicorn.run(
-        create_app(build_coordinator(config)),
-        host=config.web.host,
-        port=config.web.port,
-        log_level="info",
-        ssl_keyfile=config.web.ssl_keyfile,
-        ssl_certfile=config.web.ssl_certfile,
-    )
+    debug_window = _launch_debug_window(config) if config.runtime.debug_window else None
+    try:
+        uvicorn.run(
+            create_app(build_coordinator(config)),
+            host=config.web.host,
+            port=config.web.port,
+            log_level="info",
+            ssl_keyfile=config.web.ssl_keyfile,
+            ssl_certfile=config.web.ssl_certfile,
+        )
+    finally:
+        if debug_window is not None and debug_window.poll() is None:
+            debug_window.terminate()
 
 
 if __name__ == "__main__":

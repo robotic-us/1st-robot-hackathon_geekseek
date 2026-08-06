@@ -15,7 +15,7 @@
   };
   const captions = [
     "안녕하세요! 사진 한 장 찍고 가세요.",
-    "두 분 너무 잘 어울리세요. 인생샷 찍어드릴게요!",
+    "제가 인생샷 찍어드릴게요!",
     "제가 멋있는 구도로 찍어드릴게요.",
     "화면에 표시된 곳으로 움직여주세요.",
     "여러 개 찍겠습니다. 자연스럽게 포즈를 취해주세요!",
@@ -35,7 +35,7 @@
   ];
   const faceMoods = [
     ["mood-gentle", "상냥한 기본 얼굴", "반가워요"],
-    ["mood-sparkly", "초롱초롱 웃는 얼굴", "두 분, 너무 잘 어울려요"],
+    ["mood-sparkly", "초롱초롱 웃는 얼굴", "제가 인생샷 찍어드릴게요"],
     ["mood-sparkly", "웃으며 기다리는 얼굴", "어떤 사진이 좋을까요?"],
     ["mood-excited", "약간 신나하는 얼굴", "좋아요, 시작해볼까요?"],
     ["mood-wink", "촬영할 때마다 윙크하는 얼굴", "촬영 준비 중"],
@@ -43,22 +43,315 @@
     ["mood-waiting", "반응을 기다리는 얼굴", "마음에 드시나요?"],
     ["mood-happy", "밝게 웃으며 인사하는 얼굴", "다음에 또 만나요"],
   ];
-  const templateOrder = ["full_body", "upper_body", "product_closeup"];
+  const DEFAULT_TEMPLATE = "full_body";
+  const poseExampleCount = 4;
+  const speechMuteKey = "geekseek.face-speech-muted";
+  const stageVoiceFiles = [
+    "/static/audio/voice-01.mp3",
+    "/static/audio/voice-02.mp3",
+    "/static/audio/voice-03.mp3",
+    "/static/audio/voice-04.mp3",
+    "/static/audio/voice-05.mp3",
+    "/static/audio/voice-07.mp3",
+    "/static/audio/voice-08.mp3",
+    "/static/audio/voice-09.mp3",
+  ];
+  const countdownVoiceFile = "/static/audio/voice-06-countdown.mp3";
 
   let stage = 1;
   let workflowState = "booting";
-  let context = {state: "booting", template_id: null, photos: [], hint: "", error: "", revision: 0};
+  let context = {state: "booting", template_id: null, photos: [], hint: "", error: "", greeting_line: null, countdown: null, awaiting_ready: false, revision: 0};
   let stageTimer = null;
   let effectTimer = null;
   let effectTimeout = null;
   let carouselIndex = 0;
   let slideIndex = 0;
   let actionPending = false;
+  let speechMuted = false;
+  let speechUnlocked = false;
+  let voiceRequest = 0;
+  let countdownVoicePlayed = false;
+  const voicePlayer = page === "face" ? new Audio() : null;
+  const shutterPlayer = new Audio();
+  // A near-zero-length silent clip so the first-gesture unlock (below) has
+  // something to play immediately, even before the real shutter sound has
+  // finished fetching/decoding/boosting.
+  shutterPlayer.src =
+    "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA==";
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
 
   document.body.classList.toggle("debug-mode", debugMode);
+
+  function speechAvailable() {
+    return page === "face" && voicePlayer !== null;
+  }
+
+  // Recorded camera-shutter click. Played through a plain <audio> element —
+  // the same mechanism the TTS voice lines use — because iOS Safari tracks
+  // autoplay-unlock separately for AudioContext vs. HTMLMediaElement; an
+  // AudioContext-based click was silently inaudible even after the page's
+  // voice playback had already unlocked. The volume boost is baked into the
+  // file up front (via a one-off OfflineAudioContext render, which isn't
+  // gesture-gated) so playback itself stays on the proven <audio>.play() path.
+  const shutterSoundFile = "/static/audio/shutter.mp3";
+  const shutterGainLevel = 1.8;
+  const shutterMaxDuration = 0.4; // seconds — trims any trailing tail/reverb
+  const shutterOnsetThreshold = 0.04; // peak amplitude (0-1) that counts as "sound started"
+  const shutterOnsetLookback = 0.01; // seconds kept before the detected onset, so the attack isn't clipped
+
+  // The source recording has a bit of dead air before the actual click —
+  // scan for where the waveform actually starts instead of assuming t=0.
+  function detectOnsetSeconds(buffer) {
+    const channels = [];
+    for (let ch = 0; ch < buffer.numberOfChannels; ch += 1) channels.push(buffer.getChannelData(ch));
+    for (let i = 0; i < buffer.length; i += 1) {
+      let peak = 0;
+      for (let ch = 0; ch < channels.length; ch += 1) {
+        const value = Math.abs(channels[ch][i]);
+        if (value > peak) peak = value;
+      }
+      if (peak >= shutterOnsetThreshold) {
+        const onsetIndex = Math.max(0, i - Math.round(buffer.sampleRate * shutterOnsetLookback));
+        return onsetIndex / buffer.sampleRate;
+      }
+    }
+    return 0;
+  }
+
+  function audioBufferToWavBlob(buffer) {
+    const numChannels = buffer.numberOfChannels;
+    const numFrames = buffer.length;
+    const blockAlign = numChannels * 2;
+    const dataSize = numFrames * blockAlign;
+    const view = new DataView(new ArrayBuffer(44 + dataSize));
+    const writeString = (offset, text) => {
+      for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+    };
+    writeString(0, "RIFF");
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, "WAVE");
+    writeString(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, buffer.sampleRate, true);
+    view.setUint32(28, buffer.sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    writeString(36, "data");
+    view.setUint32(40, dataSize, true);
+
+    const channels = [];
+    for (let ch = 0; ch < numChannels; ch += 1) channels.push(buffer.getChannelData(ch));
+    let offset = 44;
+    for (let i = 0; i < numFrames; i += 1) {
+      for (let ch = 0; ch < numChannels; ch += 1) {
+        const sample = Math.max(-1, Math.min(1, channels[ch][i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += 2;
+      }
+    }
+    return new Blob([view.buffer], {type: "audio/wav"});
+  }
+
+  function prepareShutterSound() {
+    fetch(shutterSoundFile)
+      .then((response) => response.arrayBuffer())
+      .then((data) => {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        const scratchCtx = new Ctor();
+        return scratchCtx.decodeAudioData(data).then((decoded) => {
+          const onsetSeconds = detectOnsetSeconds(decoded);
+          const availableSeconds = decoded.duration - onsetSeconds;
+          const outputSeconds = Math.min(availableSeconds, shutterMaxDuration);
+          const outputFrames = Math.max(1, Math.round(outputSeconds * decoded.sampleRate));
+          const offlineCtx = new OfflineAudioContext(decoded.numberOfChannels, outputFrames, decoded.sampleRate);
+          const source = offlineCtx.createBufferSource();
+          source.buffer = decoded;
+          const gain = offlineCtx.createGain();
+          const fadeOutStart = Math.max(0, outputSeconds - 0.015);
+          gain.gain.setValueAtTime(shutterGainLevel, 0);
+          if (fadeOutStart > 0 && outputSeconds < availableSeconds) {
+            // Only the trimmed (shorter-than-source) case needs a fade —
+            // otherwise the clip already ends on its own natural decay.
+            gain.gain.setValueAtTime(shutterGainLevel, fadeOutStart);
+            gain.gain.linearRampToValueAtTime(0, outputSeconds);
+          }
+          source.connect(gain);
+          gain.connect(offlineCtx.destination);
+          source.start(0, onsetSeconds);
+          return offlineCtx.startRendering();
+        }).finally(() => scratchCtx.close?.());
+      })
+      .then((boosted) => {
+        shutterPlayer.src = URL.createObjectURL(audioBufferToWavBlob(boosted));
+        shutterPlayer.preload = "auto";
+        shutterPlayer.setAttribute("playsinline", "");
+        shutterPlayer.load();
+      })
+      .catch((error) => {
+        console.warn(`[Geekseek shutter] boosted render failed, using raw file: ${error.message}`);
+        shutterPlayer.src = shutterSoundFile;
+        shutterPlayer.preload = "auto";
+        shutterPlayer.load();
+      });
+  }
+
+  function playShutterSound() {
+    if (!shutterPlayer.src) return;
+    shutterPlayer.currentTime = 0;
+    shutterPlayer.play().catch((error) => {
+      console.warn(`[Geekseek shutter] playback failed: ${error.message}`);
+    });
+  }
+
+  function updateSpeechButton() {
+    const button = $("#speech-toggle");
+    if (!button) return;
+    const supported = speechAvailable();
+    button.disabled = !supported;
+    button.setAttribute("aria-pressed", String(speechMuted));
+    button.setAttribute("aria-label", speechMuted ? "음성 켜기" : "음소거");
+    button.title = supported ? (speechMuted ? "음성 켜기" : "음소거") : "이 브라우저는 음성을 지원하지 않습니다";
+    $("#speech-icon").textContent = speechMuted ? "🔇" : "🔊";
+    $("#speech-label").textContent = supported ? (speechMuted ? "음성 꺼짐" : "음성 켜짐") : "음성 미지원";
+  }
+
+  function cancelSpeech() {
+    voiceRequest += 1;
+    if (!voicePlayer) return;
+    voicePlayer.pause();
+    voicePlayer.currentTime = 0;
+  }
+
+  function playVoice(source) {
+    if (!speechAvailable() || !source) return;
+    cancelSpeech();
+    if (speechMuted) return;
+    const request = voiceRequest;
+    voicePlayer.src = source;
+    voicePlayer.volume = 1;
+    voicePlayer.muted = false;
+    voicePlayer.load();
+    voicePlayer.play().then(() => {
+      if (request === voiceRequest) speechUnlocked = true;
+    }).catch((error) => {
+      if (request !== voiceRequest || error.name === "AbortError") return;
+      speechUnlocked = false;
+      console.warn(`[Geekseek voice] playback failed: ${error.message}`);
+      if (!speechMuted) showUnlockBanner();
+    });
+  }
+
+  function playStageVoice(nextStage = stage) {
+    playVoice(stageVoiceFiles[nextStage - 1]);
+  }
+
+  function preloadVoices() {
+    if (!speechAvailable()) return;
+    [...stageVoiceFiles, countdownVoiceFile].forEach((source) => {
+      const audio = document.createElement("audio");
+      audio.preload = "auto";
+      audio.src = source;
+      audio.load();
+    });
+    voicePlayer.preload = "auto";
+    voicePlayer.setAttribute("playsinline", "");
+    voicePlayer.addEventListener("error", () => {
+      const mediaError = voicePlayer.error;
+      if (mediaError) {
+        console.warn(`[Geekseek voice] media error ${mediaError.code}: ${voicePlayer.currentSrc}`);
+      }
+    });
+  }
+
+  function ensureUnlockBanner() {
+    let banner = $("#speech-unlock-banner");
+    if (banner) return banner;
+    banner = document.createElement("button");
+    banner.id = "speech-unlock-banner";
+    banner.type = "button";
+    banner.className = "speech-unlock-banner";
+    banner.innerHTML = '<span>🔈</span> 화면을 한 번 눌러 음성을 켜주세요 (설정 시 1회)';
+    banner.addEventListener("click", warmUpSpeech);
+    document.body.append(banner);
+    return banner;
+  }
+
+  function showUnlockBanner() {
+    if (page !== "face" || !speechAvailable() || speechMuted) return;
+    ensureUnlockBanner().hidden = false;
+  }
+
+  function hideUnlockBanner() {
+    $("#speech-unlock-banner")?.remove();
+  }
+
+  function warmUpSpeech() {
+    if (!speechAvailable() || speechUnlocked) return;
+    speechUnlocked = true;
+    hideUnlockBanner();
+    console.info("[Geekseek voice] audio unlocked by user gesture");
+    if (!speechMuted) playStageVoice();
+  }
+
+  function toggleSpeech() {
+    if (!speechAvailable()) return;
+    speechMuted = !speechMuted;
+    try {
+      window.localStorage.setItem(speechMuteKey, String(speechMuted));
+    } catch (error) {
+      console.warn(`[Geekseek TTS] mute preference was not saved: ${error.message}`);
+    }
+    updateSpeechButton();
+    if (speechMuted) {
+      cancelSpeech();
+      hideUnlockBanner();
+    } else {
+      if (!speechUnlocked) showUnlockBanner();
+      else if (stateToStage[workflowState]) playStageVoice();
+    }
+  }
+
+  function setupSpeech() {
+    if (page !== "face") return;
+    try {
+      speechMuted = window.localStorage.getItem(speechMuteKey) === "true";
+    } catch (error) {
+      console.warn(`[Geekseek TTS] mute preference was not loaded: ${error.message}`);
+    }
+    updateSpeechButton();
+    if (!speechAvailable()) return;
+    preloadVoices();
+    document.addEventListener("pointerdown", warmUpSpeech, {capture: true, once: true});
+    document.addEventListener("touchend", warmUpSpeech, {capture: true, once: true});
+    document.addEventListener("click", warmUpSpeech, {capture: true, once: true});
+    $("#speech-toggle")?.addEventListener("click", toggleSpeech);
+    if (!speechMuted) showUnlockBanner();
+  }
+
+  function setupShutterAudio() {
+    prepareShutterSound();
+    // iOS Safari only allows script-triggered <audio>.play() once THIS
+    // element has successfully played from within a real user gesture —
+    // do a muted play/pause/reset on the first tap purely to earn that.
+    const unlockShutterElement = () => {
+      const wasMuted = shutterPlayer.muted;
+      shutterPlayer.muted = true;
+      shutterPlayer.play().then(() => {
+        shutterPlayer.pause();
+        shutterPlayer.currentTime = 0;
+        shutterPlayer.muted = wasMuted;
+      }).catch(() => {
+        shutterPlayer.muted = wasMuted;
+      });
+    };
+    document.addEventListener("pointerdown", unlockShutterElement, {capture: true, once: true});
+    document.addEventListener("touchend", unlockShutterElement, {capture: true, once: true});
+    document.addEventListener("click", unlockShutterElement, {capture: true, once: true});
+  }
 
   function clearEffects() {
     window.clearInterval(stageTimer);
@@ -90,10 +383,18 @@
     }
   }
 
+  const readyCaption = "준비되시면 손을 들어주세요!";
+
+  function currentCaption() {
+    if (workflowState === "capturing" && context.awaiting_ready) return readyCaption;
+    const personalizable = workflowState === "greeting" || workflowState === "deciding";
+    return (personalizable && context.greeting_line) || captions[stage - 1];
+  }
+
   function enterStage(nextStage) {
     clearEffects();
     stage = nextStage;
-    $("#caption").textContent = captions[stage - 1];
+    $("#caption").textContent = currentCaption();
     if (page === "face") renderFace();
     if (page === "guide") renderGuide();
   }
@@ -152,13 +453,8 @@
     const strip = $("#example-strip");
     if (!strip) return;
     strip.style.transform = `translateX(-${carouselIndex * 100}%)`;
-    $("#carousel-count").textContent = `${carouselIndex + 1} / ${templateOrder.length}`;
+    $("#carousel-count").textContent = `${carouselIndex + 1} / ${poseExampleCount}`;
     $$(".carousel-dots i").forEach((dot, index) => dot.classList.toggle("active", index === carouselIndex));
-  }
-
-  function selectedTemplate() {
-    const cards = $$(".example-card");
-    return cards[carouselIndex]?.dataset.template || context.template_id || "full_body";
   }
 
   function updateCaptureData(previous) {
@@ -170,6 +466,14 @@
     if (progress) progress.style.width = `${Math.min(count / 3, 1) * 100}%`;
     if (photoName) photoName.textContent = `PHOTO ${count} / 3`;
 
+    if (workflowState === "capturing" && count > previous.photos.length) {
+      playShutterSound();
+    }
+
+    if (page === "guide" && workflowState === "capturing" && count > previous.photos.length) {
+      flashCapturedPhoto(context.photos[count - 1]);
+    }
+
     if (page === "face" && workflowState === "capturing") {
       $("#face-note").textContent = count ? `찰칵 · ${String(count).padStart(2, "0")} / 03` : "촬영 준비 중";
       if (count > previous.photos.length) {
@@ -180,6 +484,37 @@
         effectTimeout = window.setTimeout(() => face.classList.remove("wink-now"), 300);
       }
     }
+  }
+
+  function flashCapturedPhoto(photoUrl) {
+    const flash = $("#burst-flash");
+    if (!flash || !photoUrl) return;
+    flash.src = photoUrl;
+    flash.classList.remove("visible");
+    void flash.offsetWidth; // force reflow so re-adding the class replays the transition
+    flash.classList.add("visible");
+    window.setTimeout(() => flash.classList.remove("visible"), 700);
+  }
+
+  function updateCountdown() {
+    const overlay = $("#countdown-overlay");
+    const numberEl = $("#countdown-number");
+    if (!overlay || !numberEl) return;
+    if (context.countdown) {
+      overlay.hidden = false;
+      numberEl.textContent = String(context.countdown);
+      numberEl.style.animation = "none";
+      void numberEl.offsetWidth; // force reflow so the pop animation replays each tick
+      numberEl.style.animation = "";
+    } else {
+      overlay.hidden = true;
+    }
+  }
+
+  function updateReadyOverlay() {
+    const overlay = $("#ready-overlay");
+    if (!overlay) return;
+    overlay.hidden = !context.awaiting_ready;
   }
 
   function syncSlideshowPhotos() {
@@ -242,8 +577,26 @@
   }
 
   function updateData(previous) {
+    if (page === "guide") {
+      updateCountdown();
+      updateReadyOverlay();
+    }
     if (workflowState === "capturing") updateCaptureData(previous);
     if (workflowState === "previewing" && page === "guide") syncSlideshowPhotos();
+    // The VLM line usually lands a second or two after the greeting caption
+    // was already shown from the static list — swap it in live when it does.
+    if (context.greeting_line && context.greeting_line !== previous.greeting_line) {
+      $("#caption").textContent = currentCaption();
+    }
+    if (workflowState === "capturing" && context.awaiting_ready !== previous.awaiting_ready) {
+      $("#caption").textContent = currentCaption();
+    }
+    // The prerecorded countdown already contains 3→2→1, so trigger it only
+    // once when the backend starts the countdown instead of on every tick.
+    if (workflowState === "capturing" && page === "face" && context.countdown === 3 && !countdownVoicePlayed) {
+      countdownVoicePlayed = true;
+      playVoice(countdownVoiceFile);
+    }
   }
 
   function ensureFeedback() {
@@ -333,7 +686,7 @@
   }
 
   function runDebugAction() {
-    if (workflowState === "deciding") runAction("/api/capture-started", {template_id: selectedTemplate()});
+    if (workflowState === "deciding") runAction("/api/capture-started", {template_id: DEFAULT_TEMPLATE});
     if (workflowState === "asking") runAction("/api/liked");
     if (workflowState === "error") runAction("/api/reset");
   }
@@ -347,6 +700,9 @@
       photos: Array.isArray(snapshot.photos) ? snapshot.photos : [],
       hint: snapshot.hint || "",
       error: snapshot.error || "",
+      greeting_line: snapshot.greeting_line ?? null,
+      countdown: snapshot.countdown ?? null,
+      awaiting_ready: Boolean(snapshot.awaiting_ready),
       revision: Number.isFinite(snapshot.revision) ? snapshot.revision : 0,
     };
     const stateChanged = next.state !== workflowState;
@@ -355,10 +711,10 @@
 
     if (stateToStage[workflowState]) {
       if (stateChanged) {
-        if (workflowState === "deciding" && context.template_id && templateOrder.includes(context.template_id)) {
-          carouselIndex = templateOrder.indexOf(context.template_id);
-        }
+        if (workflowState === "deciding") carouselIndex = 0;
+        if (workflowState === "capturing") countdownVoicePlayed = false;
         enterStage(stateToStage[workflowState]);
+        if (page === "face") playStageVoice();
       }
       updateData(previous);
       setConnectionChip("online");
@@ -368,6 +724,7 @@
     } else if (workflowState === "error") {
       setConnectionChip("error");
     }
+    if (stateChanged && !stateToStage[workflowState] && page === "face") cancelSpeech();
     updateErrorOverlay();
     updateControls();
   }
@@ -404,14 +761,38 @@
     }
   }
 
-  $("#carousel-prev")?.addEventListener("click", () => { carouselIndex = (carouselIndex + 2) % 3; updateCarousel(); });
-  $("#carousel-next")?.addEventListener("click", () => { carouselIndex = (carouselIndex + 1) % 3; updateCarousel(); });
-  $("#start-capture")?.addEventListener("click", () => runAction("/api/capture-started", {template_id: selectedTemplate()}));
+  function setupCameraFeeds() {
+    // <img>-driven MJPEG streams don't auto-reconnect the way EventSource
+    // does — if the server restarts (or the connection just drops) the
+    // stream dies silently and stays dead until something resets `src`.
+    // Retry with a cache-busting query param instead of giving up.
+    $$(".camera-feed").forEach((img) => {
+      let retryTimer = null;
+      const reconnect = () => {
+        img.style.visibility = "hidden";
+        window.clearTimeout(retryTimer);
+        retryTimer = window.setTimeout(() => {
+          img.src = `/live/camera?retry=${Date.now()}`;
+        }, 1500);
+      };
+      img.addEventListener("error", reconnect);
+      img.addEventListener("load", () => {
+        img.style.visibility = "visible";
+      });
+    });
+  }
+
+  $("#carousel-prev")?.addEventListener("click", () => { carouselIndex = (carouselIndex + poseExampleCount - 1) % poseExampleCount; updateCarousel(); });
+  $("#carousel-next")?.addEventListener("click", () => { carouselIndex = (carouselIndex + 1) % poseExampleCount; updateCarousel(); });
+  $("#start-capture")?.addEventListener("click", () => runAction("/api/capture-started", {template_id: DEFAULT_TEMPLATE}));
   $("#decline")?.addEventListener("click", () => runAction("/api/decline"));
   $("#review-again")?.addEventListener("click", () => runAction("/api/replay"));
   $("#review-like")?.addEventListener("click", () => runAction("/api/liked"));
   $("#next-stage")?.addEventListener("click", runDebugAction);
 
+  setupSpeech();
+  setupShutterAudio();
+  setupCameraFeeds();
   enterStage(1);
   updateCaptureData(context);
   updateErrorOverlay();

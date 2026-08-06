@@ -47,6 +47,9 @@ class WorkflowContext:
     photos: list[str] = field(default_factory=list)
     hint: str = ""
     error: str = ""
+    greeting_line: str | None = None  # VLM 개인화 인사말 (2단계), 없으면 프런트가 기본 캡션 사용
+    countdown: int | None = None  # 5단계 촬영 시작 전 3-2-1 카운트다운, 끝나면 None
+    awaiting_ready: bool = False  # 5단계 정위치 도달 후, 카운트다운 전 "손 들어 준비완료" 대기 중
     revision: int = 0
 
     def as_dict(self) -> dict[str, Any]:
@@ -99,6 +102,9 @@ def apply_event(context: WorkflowContext, event: Event) -> None:
         context.photos = []
         context.hint = ""
         context.error = ""
+        context.greeting_line = None
+        context.countdown = None
+        context.awaiting_ready = False
 
     context.state = next_state
     context.revision += 1

@@ -15,11 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import cv2
-import mediapipe as mp
-from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python import vision
 
-from geekseek.perception import MODEL_PATH
+from geekseek.perception import MODEL_PATH, create_pose_landmarker
 
 CONNECTIONS = vision.PoseLandmarksConnections().POSE_LANDMARKS
 
@@ -47,13 +45,7 @@ def main() -> None:
         print(f"could not open camera index {camera_index}")
         raise SystemExit(1)
 
-    options = vision.PoseLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(MODEL_PATH)),
-        running_mode=vision.RunningMode.IMAGE,
-        num_poses=1,
-        min_pose_detection_confidence=0.5,
-    )
-    landmarker = vision.PoseLandmarker.create_from_options(options)
+    mp, landmarker, delegate_name = create_pose_landmarker(MODEL_PATH, max_people=2)
 
     window = "geekseek pose preview (q/Esc to quit)"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
@@ -69,11 +61,10 @@ def main() -> None:
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             result = landmarker.detect(mp_image)
 
-            if result.pose_landmarks:
-                draw_skeleton(frame, result.pose_landmarks[0])
-                label = "detected"
-            else:
-                label = "no person"
+            for landmarks in result.pose_landmarks:
+                draw_skeleton(frame, landmarks)
+            people = len(result.pose_landmarks)
+            label = f"people={people}  delegate={delegate_name}" if people else f"no person  delegate={delegate_name}"
             cv2.putText(frame, label, (16, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
 
             cv2.imshow(window, frame)

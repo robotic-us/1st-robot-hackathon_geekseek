@@ -5,6 +5,7 @@ runtime:
   capture_seconds: 0.2
   person_sensor: mediapipe
   camera_index: 0
+  debug_window: true
 
 web:
   host: 0.0.0.0

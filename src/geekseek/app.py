@@ -7,6 +7,7 @@ from .config import AppConfig
 from .coordinator import Coordinator
 from .perception import FakePersonSensor, MediaPipePersonSensor, WebcamFrameSource
 from .robot import FakeRobot, RvizRobot
+from .vlm import ClaudeGreeter
 
 PHOTOS_DIR = Path(__file__).resolve().parents[2] / "photos"
 
@@ -27,15 +28,18 @@ def build_coordinator(config: AppConfig) -> Coordinator:
     frame_source = None
     if config.runtime.person_sensor == "mediapipe":
         person_sensor = MediaPipePersonSensor()
-        frame_source = WebcamFrameSource(config.runtime.camera_index)
+        frame_source = WebcamFrameSource(config.runtime.camera_index, config.runtime.camera_fps)
     elif config.runtime.person_sensor == "fake":
         person_sensor = FakePersonSensor()
+
+    greeter = ClaudeGreeter() if config.runtime.vlm_enabled else None
 
     return Coordinator(
         robot=robot,
         capture=capture,
         person_sensor=person_sensor,
         frame_source=frame_source,
+        greeter=greeter,
         sense_interval=config.runtime.sense_interval,
         greeting_seconds=config.runtime.greeting_seconds,
         preview_seconds=config.runtime.preview_seconds,
