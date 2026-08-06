@@ -6,7 +6,8 @@
 1. [`progress/STATUS.md`](progress/STATUS.md) — 지금 어디까지 됐는지 한눈에
 2. [`knowledge/decisions.md`](knowledge/decisions.md) — 확정된 것 / 아직 열려 있는 것
 3. [`knowledge/architecture/camera-robot-architecture.html`](knowledge/architecture/camera-robot-architecture.html) — 전체 소프트웨어 아키텍처 설계 (브라우저로 열어서 볼 것)
-4. [`work/README.md`](work/README.md) — 지금 진행 중인 작업 트랙들, 여기서 하나 골라 시작
+4. [`knowledge/architecture/runtime-architecture.md`](knowledge/architecture/runtime-architecture.md) — 단순한 상태 머신·모듈·ROS 경계 구현 기준
+5. [`work/README.md`](work/README.md) — 지금 진행 중인 작업 트랙들, 여기서 하나 골라 시작
 
 ## 폴더는 왜 이렇게 셋으로 나뉘어 있나
 
@@ -55,7 +56,8 @@ context/
 ├── knowledge/                       ← 안정적 지식
 │   ├── decisions.md                    확정/미확정 결정 로그
 │   ├── architecture/
-│   │   └── camera-robot-architecture.html   전체 아키텍처 설계 문서(다이어그램 포함)
+│   │   ├── camera-robot-architecture.html   전체 아키텍처 설계 문서(다이어그램 포함)
+│   │   └── runtime-architecture.md          상태 머신·모듈·실행 구조 구현 기준
 │   └── reference/sdk-docs/             해커톤 운영진이 배포한 SDK 문서 원본
 │       ├── 01-quickstart.html
 │       ├── 02-tutorial.html
@@ -66,6 +68,7 @@ context/
 │       └── ot-hackathon-kickoff.pdf          (원본명: OT_해커톤시작_2026-08-05_최종본)
 ├── work/                            ← 진행 중인 작업 트랙
 │   ├── README.md                       트랙 목록 + 작업 체크리스트
+│   ├── 00-runtime-foundation/{README.md, NOTES.md}
 │   ├── A-robot-motion-loop/{README.md, NOTES.md}
 │   ├── B-perception-skeleton/{README.md, NOTES.md}
 │   ├── C-eef-camera-shutter/{README.md, NOTES.md}
