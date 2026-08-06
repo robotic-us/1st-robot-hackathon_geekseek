@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko" data-page="debug">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Geekseek Debug</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="kiosk debug-page">
+    <header><span class="brand">GEEKSEEK DEBUG</span><span id="connection" class="connection">연결 중</span></header>
+    <section class="debug-layout">
+      <div>
+        <p class="eyebrow">WORKFLOW</p><h1 id="headline">상태 머신</h1><p id="message"></p>
+        <div class="debug-buttons">
+          <button data-template="full_body">전신 선택</button><button data-template="upper_body">상반신 선택</button>
+          <button data-template="product_closeup">제품 선택</button><button id="align" class="primary">정렬 완료</button>
+          <button id="retake">재촬영</button><button id="accept" class="primary">사진 확정</button><button id="reset">오류 초기화</button>
+        </div>
+        <nav><a href="/face" target="_blank">iPad 1 화면</a><a href="/guide" target="_blank">iPad 2 화면</a><a href="/docs" target="_blank">API 문서</a></nav>
+      </div>
+      <pre id="debug-json">연결 중…</pre>
+    </section>
+    <footer>촬영 상태 <code id="state">booting</code></footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

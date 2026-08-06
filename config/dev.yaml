@@ -1,0 +1,14 @@
+runtime:
+  robot: fake
+  capture: fake
+  move_seconds: 0.05
+  capture_seconds: 0.05
+
+verification:
+  vlm_enabled: false
+  timeout_seconds: 3
+  fail_open: true
+
+web:
+  host: 0.0.0.0
+  port: 8000

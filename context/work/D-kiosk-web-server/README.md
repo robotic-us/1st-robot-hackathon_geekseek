@@ -11,18 +11,26 @@ Jetson에 로컬 웹서버(FastAPI 권장)를 띄우고, iPad 2대가 각자 지
 꽂을 수 있다.
 
 ## 현재 상태
-`시작 전`
+`진행 중 · FastAPI/SSE/iPad 1·2 화면 구현 완료`
+
+구현된 경로:
+
+- `/face`: 구도 3종 선택과 현재 상태 표시
+- `/guide`: 가이드 placeholder, 개발용 정렬 완료, fake 사진 리뷰·재촬영·확정
+- `/debug`: 전체 컨텍스트와 모든 개발용 제어
+- `/events`: `WorkflowContext` SSE 실시간 전송
+
+노트북의 실제 Uvicorn/API/SSE 왕복은 검증했다. 실제 iPad 2대의 Safari 접속과 MJPEG 영상 연결은 남아 있다.
 
 ## 다음 단계
-1. FastAPI(또는 Flask) 최소 서버: 정적 페이지 하나 + 헬스체크 엔드포인트.
-2. 라우트 2개로 분리:
+1. ~~FastAPI 최소 서버와 상태 API 구현.~~
+2. ~~라우트 2개로 분리:~~
    - `/face` (iPad1용) — 얼굴/상태 표시 + 구도 템플릿 썸네일 선택 UI. 상태는 SSE/WebSocket으로 push.
    - `/guide` (iPad2용) — 라이브 프리뷰(처음엔 그냥 원본 웹캠 스트림, 나중에 B트랙 합성 오버레이로 교체)
      + 모드 선택/재촬영 버튼(터치 → `POST`).
 3. Jetson·iPad를 같은 Wi-Fi(또는 Jetson 핫스팟)에 붙이고, iPad Safari에서 `http://<Jetson IP>:<port>/face`,
    `/guide` 접속 확인 → 설정 앱에서 "가이드 접근 모드"로 풀스크린 고정.
-4. 상태 push 동작 확인: 서버 쪽에서 상태를 바꾸면(터미널에서 강제로) iPad 화면이 새로고침 없이
-   갱신되는지 확인 (폴링 금지 — SSE/WebSocket으로).
+4. ~~SSE 상태 push를 브라우저/API 테스트로 확인.~~ 실제 iPad 2대 동시 접속을 추가 확인.
 5. B트랙이 완성되면 `/guide`의 프리뷰 소스를 원본 웹캠 → B트랙의 합성 프레임(MJPEG)으로 교체.
    C트랙이 완성되면 캡처 결과 미리보기를 `/guide`에 표시.
 

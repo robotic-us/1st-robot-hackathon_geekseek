@@ -62,6 +62,7 @@ src/geekseek/
 ├── workflow.py       # State, Event, WorkflowContext, 전이 규칙
 ├── coordinator.py    # 이벤트 처리와 비동기 작업 오케스트레이션
 ├── perception.py     # 카메라, Pose, 정렬 점수, 오버레이
+├── verification.py   # 로컬 검증 + 선택적 VLM 검증
 ├── robot.py          # Robot 인터페이스 + FakeRobot + PhorceRobot
 ├── capture.py        # Capture 인터페이스 + fake/폰 HTTP 구현
 └── web.py            # FastAPI, SSE, MJPEG, iPad API
@@ -85,6 +86,7 @@ tests/
 | `workflow.py` | 상태·이벤트·컨텍스트·전이 규칙 | FastAPI, OpenCV, ROS import |
 | `coordinator.py` | 이벤트 소비, 상태 변경, 로봇/촬영 작업 시작 | Pose 추론, HTTP 라우트 정의 |
 | `perception.py` | 프레임→Pose→점수→오버레이 | 워크플로 상태 직접 변경 |
+| `verification.py` | 정렬된 후보 프레임의 최종 검증, 선택적 VLM 호출 | 실시간 Pose 루프, 촬영·로봇 호출 |
 | `robot.py` | fake 또는 phorce 슬롯 재생 | 구도 선택 정책, UI 처리 |
 | `capture.py` | fake 또는 촬영폰 HTTP 왕복 | 워크플로 상태 직접 변경 |
 | `web.py` | iPad 페이지·API·SSE·MJPEG | 상태 직접 변경, 하드웨어 호출 |
@@ -112,9 +114,9 @@ stateDiagram-v2
     ERROR --> READY: RESET_REQUESTED
 ```
 
-초기 P0에서는 무거운 최종 검증을 생략할 수 있도록 `VERIFYING`이 즉시
-`VERIFICATION_PASSED`를 반환하게 한다. 이는 상태나 기능을 삭제하는 것이 아니라 실제 검증 구현을 나중에
-끼울 수 있는 자리다.
+초기 P0에서는 `LocalVerifier`가 Pose 정렬 결과만 확인하고 즉시 `VERIFICATION_PASSED`를 반환한다.
+VLM 없는 전체 흐름을 먼저 완성한 뒤 같은 `Verifier` 인터페이스에 `VlmVerifier`를 선택적으로 연결한다.
+상태 머신·웹·촬영 코드는 이 확장 때문에 바뀌지 않는다.
 
 A 트랙 전에는 `FakeRobot.move_to()`가 짧은 지연 뒤 `ROBOT_COMPLETED`를 발행한다. Jetson에서는 같은
 인터페이스의 `PhorceRobot`이 `slot_map`을 조회해 `robot.play(id)`를 실행한다.
@@ -165,9 +167,55 @@ CAPTURING 진입
 
 폰 기종별 차이는 `capture.py` 안에만 남고 상태 머신과 웹 API에는 노출하지 않는다.
 
+## 선택적 VLM 검증
+
+VLM은 필수 경로가 아니라 `VERIFYING` 상태의 선택적 보강 게이트다. 실시간 Pose 루프에는 넣지 않고,
+정렬 점수가 N프레임 유지된 순간 고정한 후보 프레임 한 장에만 호출한다.
+
+```python
+@dataclass
+class VerificationResult:
+    passed: bool
+    reason: str = ""
+    hint: str = ""
+
+
+class Verifier(Protocol):
+    async def verify(
+        self,
+        frame: bytes,
+        context: WorkflowContext,
+    ) -> VerificationResult: ...
+```
+
+구현은 복잡한 플러그인 체인 대신 두 가지로만 시작한다.
+
+- `LocalVerifier`: Pose 정렬·향후 로컬 실루엣 검증. P0 기본값이며 외부 네트워크가 필요 없다.
+- `VlmVerifier`: 로컬 검증을 먼저 통과한 후보에 대해 표정·전체 구도·어색한 자세를 추가 확인한다.
+
+```yaml
+verification:
+  vlm_enabled: false
+  timeout_seconds: 3
+  fail_open: true
+```
+
+`vlm_enabled: false`에서는 VLM 코드를 호출하지 않는다. 나중에 `true`로 바꾸면 같은 `VERIFYING` 상태에서
+VLM을 추가 호출한다. `fail_open: true`이므로 네트워크 오류·타임아웃·API 오류가 발생하면 로컬 검증 결과로
+계속 진행하고, VLM 때문에 기본 촬영 기능이 멈추지 않는다. 호출 중에는 iPad 2에 "AI가 구도를 확인하고
+있어요" 상태를 즉시 표시한다.
+
+테스트는 VLM 실제 API 없이도 다음 세 결과를 fake로 먼저 고정한다.
+
+1. 통과 → `VERIFICATION_PASSED`
+2. 구도 거절 → 이유·이동 힌트와 함께 `VERIFICATION_FAILED`, `GUIDING` 복귀
+3. 타임아웃/오류 → 로컬 결과로 계속 진행(fail-open)
+
 ## ROS 2 경계
 
-B·C·D와 fake 전체 시나리오는 ROS 없이 실행한다. Jetson의 A 통합에서만 ROS 환경을 사용한다.
+B·C·D와 기본 fake 전체 시나리오는 ROS 없이 실행한다. Jetson의 A 통합에서만 ROS 환경을 사용한다.
+단, 로봇 하드웨어가 오기 전에 흐름과 포즈를 눈으로 검증하기 위한 `rviz` 개발 프로필은 별도 ROS 2
+프로세스를 사용한다. 이 예외도 `RvizRobot` 어댑터 안에만 머물며 상태 머신에는 ROS가 들어오지 않는다.
 
 ```text
 일반 asyncio 영역                 ROS 영역(Jetson에서만)
@@ -184,16 +232,29 @@ Capture HTTP
 - ROS 스레드에서 업무 이벤트를 보낼 때는 `loop.call_soon_threadsafe()`를 사용한다.
 - 비로봇 모듈을 ROS 노드나 ROS 토픽으로 연결하지 않는다.
 
+### RViz fake robot
+
+- CAD 원본은 `assets/cad/Assemble_CAM.step`에 그대로 보존한다.
+- STEP가 298개 솔리드로 평탄화되어 관절별 링크를 신뢰성 있게 자동 분리할 수 없으므로, 현재 RViz
+  모델은 실제 6개 액추에이터와 약 0.44m 높이를 반영한 primitive URDF를 사용한다.
+- `/geekseek/fake_robot/target`에는 `frame.full_body`, `frame.upper_body`,
+  `frame.product_closeup` 같은 의미 기반 포즈만 전달한다.
+- 링크별 CAD 메시가 정리되면 토픽·상태 머신·포즈 이름은 그대로 두고 URDF `visual`만 교체한다.
+
 ## 실행 프로필
 
 ```bash
-python -m geekseek --config config/dev.yaml
-python -m geekseek --config config/jetson.yaml
+python3 -m geekseek --config config/dev.yaml
+PYTHONPATH="src:${PYTHONPATH}" python3 -m geekseek --config config/rviz.yaml
 ```
+
+`--demo`를 추가하면 웹서버 없이 한 사이클만 자동 실행한다. 웹 실행 시 `/face`, `/guide`, `/debug`가
+같은 `Coordinator`를 공유하고 `/events` SSE로 최신 상태를 반영한다.
 
 | 프로필 | Camera/Pose | Robot | Capture |
 |---|---|---|---|
 | `dev` | 노트북 웹캠 또는 녹화 영상 | `FakeRobot` | `FakeCapture` |
+| `rviz` | fake 정렬 이벤트 | RViz 6관절 `RvizRobot` | `FakeCapture` |
 | `jetson` | C270 + Jetson용 추론기 | `PhorceRobot` | 실제 폰 HTTP |
 
 별도 DI 컨테이너나 플러그인 시스템 없이 `config.py`에서 설정값에 따라 클래스를 명시적으로 조립한다.
@@ -206,7 +267,8 @@ python -m geekseek --config config/jetson.yaml
 4. 구도 템플릿 점수, N프레임 안정화, 오버레이
 5. `FakeRobot`과 `FakeCapture`
 6. 구도 선택→가이드→정렬→촬영→리뷰→재촬영/확정 전체 통합 테스트
-7. 실제 폰을 사용할 수 있으면 HTTP 캡처 어댑터까지 검증
+7. `LocalVerifier` 기본 구현과 fake VLM 성공·거절·타임아웃 테스트
+8. 실제 폰을 사용할 수 있으면 HTTP 캡처 어댑터까지 검증
 
 Jetson에서는 C270 장치 번호·성능, phorce/ROS, 실제 네트워크만 검증하고 구현체를 교체한다.
 

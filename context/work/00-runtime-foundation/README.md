@@ -11,7 +11,7 @@
 
 ## 현재 상태
 
-`설계 완료 · 구현 전`
+`진행 중 · 코어 상태 머신/fake 흐름/RViz/iPad 웹 제어 완료`
 
 ## 구현 범위
 
@@ -19,8 +19,13 @@
 2. `workflow.py`의 상태·이벤트·컨텍스트·전이 규칙
 3. `Coordinator`와 단일 `asyncio.Queue`
 4. `FakeRobot`, `FakeCapture`, fake/녹화 영상 입력
-5. FastAPI `/face`, `/guide`, `/events`, `/stream.mjpg` 최소 라우트
-6. fake 전체 시나리오 통합 테스트
+5. `Verifier` 인터페이스와 VLM 없는 `LocalVerifier`
+6. FastAPI `/face`, `/guide`, `/events`, `/stream.mjpg` 최소 라우트
+7. fake 전체 시나리오와 fake VLM 성공·거절·타임아웃 테스트
+
+현재 1~6의 코어와 웹, 7의 VLM 없는 happy path·재촬영·검증 거절 경로까지 구현했다. `/face`, `/guide`,
+`/debug`, `/events` 및 제어 API가 같은 `Coordinator`에 연결되어 있다. perception/MJPEG 연결과 fake VLM
+타임아웃 경로가 다음 작업이다. RViz 개발용 6관절 fake robot은 `ros/geekseek_fake_robot/`에 분리했다.
 
 ## 완료 기준
 
@@ -29,6 +34,7 @@
 - 브라우저에서 구도를 선택하면 fake 로봇 이동 후 가이드 상태로 넘어간다.
 - fake 정렬 완료 후 샘플 사진이 리뷰 화면에 표시된다.
 - 재촬영은 `GUIDING`, 사진 확정은 `READY`로 되돌아간다.
+- VLM이 꺼진 상태로 전체 흐름이 동작하고, 나중에 `VlmVerifier`를 상태 머신 변경 없이 연결할 수 있다.
 - FastAPI·OpenCV·ROS 구현이 `workflow.py`에 침투하지 않는다.
 
 ## 진행 기록
