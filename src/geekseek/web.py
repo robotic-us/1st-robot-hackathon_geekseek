@@ -4,10 +4,11 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .capture import WebAppCapture
 from .coordinator import Coordinator
 from .workflow import EventType, State
 
@@ -25,6 +26,28 @@ def create_app(coordinator: Coordinator) -> FastAPI:
     app = FastAPI(title="Geekseek Kiosk", lifespan=lifespan)
     app.state.coordinator = coordinator
     app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
+
+    if isinstance(coordinator.capture, WebAppCapture):
+        capture = coordinator.capture
+        capture.save_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/photos", StaticFiles(directory=capture.save_dir), name="photos")
+
+        @app.get("/phone", include_in_schema=False)
+        async def phone_page() -> FileResponse:
+            return FileResponse(WEB_ROOT / "phone_capture.html")
+
+        @app.websocket("/phone-ws")
+        async def phone_ws(websocket: WebSocket) -> None:
+            await websocket.accept()
+            capture.bind(websocket)
+            try:
+                while True:
+                    data = await websocket.receive_bytes()
+                    capture.on_frame(data)
+            except WebSocketDisconnect:
+                pass
+            finally:
+                capture.unbind(websocket)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:

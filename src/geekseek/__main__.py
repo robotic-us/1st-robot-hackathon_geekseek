@@ -44,6 +44,8 @@ def main() -> None:
         host=config.web.host,
         port=config.web.port,
         log_level="info",
+        ssl_keyfile=config.web.ssl_keyfile,
+        ssl_certfile=config.web.ssl_certfile,
     )
 
 

@@ -9,13 +9,23 @@ C270 프레임에서 경량 pose(스켈레톤) 모델로 키포인트를 뽑고,
 시작할 수 있는 유일한 트랙 — Ubuntu 환경 세팅을 기다릴 필요도 없이 이 부분부터 먼저 짤 수 있다.
 
 ## 현재 상태
-`시작 전`
+`진행 중` — 최소 인식(사람 접근/정위치 신호)까지 구현·검증 완료. 구도 템플릿 정렬 점수·AR 오버레이는 다음.
+
+구현된 것 (`src/geekseek/perception.py`):
+- `MediaPipePersonSensor` — MediaPipe Pose Landmarker(`models/pose_landmarker_lite.task`, IMAGE 모드)로
+  프레임 한 장에서 `PersonSignal(detected, size_ratio, center_x, center_y)`을 뽑음. 신뢰도 낮은 관절점은
+  걸러내고(`visibility` 기준) 좌표를 [0,1]로 clamp — 처음엔 사람이 없는데도 낮은 신뢰도 관절이 화면 밖으로
+  튀어서 size_ratio가 1.8까지 나오는 버그가 있었고, 이 필터로 해결.
+- `is_approaching()` / `is_positioned()` — 시나리오 2단계(접근 감지)·4→5단계(정위치 확인)에 대응하는
+  임계값 판단 헬퍼. 아직 워크플로 상태 머신에는 연결 안 함(별도 결정 필요, 아래 참고).
+- `FakePersonSensor` — 다른 트랙과 동일한 fake/real 분리 패턴, 테스트·dev용.
+- `scripts/test_webcam_perception.py` — 노트북 웹캠(C270 대신)으로 라이브 검증하는 독립 스크립트.
+  실행 결과: 145프레임 전부 정상 감지, size_ratio 0.13~0.22·center 안정적으로 확인(2026-08-06).
 
 ## 다음 단계
-1. OpenCV로 C270에서 프레임 잡기 (`cv2.VideoCapture`, USB 장치이므로 V4L2 백엔드 확인).
-2. 경량 pose 모델 선정 — 후보: MediaPipe Pose(설치 쉬움, CPU에서도 실시간), YOLOv8-pose(Jetson에서
-   TensorRT로 최적화 가능하면 더 빠름). 처음엔 MediaPipe로 빠르게 프로토타입하고, Jetson에서 프레임률이
-   부족하면 TensorRT 경로로 바꾸는 순서를 권장.
+1. ~~OpenCV/MediaPipe로 프레임에서 사람 신호 뽑기.~~ 완료 — 위 참고.
+2. ~~경량 pose 모델 선정.~~ MediaPipe Pose Landmarker(lite)로 확정. 모델 파일은 `models/`에 커밋됨(오프라인
+   대비, STEP/STL과 같은 방식).
 3. 구도 템플릿 스키마 정의 — 예:
    ```python
    TEMPLATE = {

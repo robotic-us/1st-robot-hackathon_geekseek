@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>phone capture test</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font-family: -apple-system, sans-serif; }
+  video { width: 100%; display: block; }
+  #status { padding: 12px; font-size: 14px; }
+</style>
+</head>
+<body>
+<video id="v" autoplay playsinline muted></video>
+<div id="status">connecting...</div>
+<canvas id="c" style="display:none"></canvas>
+<script>
+  const statusEl = document.getElementById("status");
+  const video = document.getElementById("v");
+  const canvas = document.getElementById("c");
+
+  async function start() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false,
+    });
+    video.srcObject = stream;
+
+    const ws = new WebSocket(`wss://${location.host}/phone-ws`);
+    ws.onopen = () => (statusEl.textContent = "connected, waiting for capture signal");
+    ws.onclose = () => (statusEl.textContent = "disconnected");
+    ws.onerror = () => (statusEl.textContent = "websocket error");
+    ws.onmessage = (event) => {
+      if (event.data !== "capture") return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      canvas.toBlob(
+        (blob) => {
+          ws.send(blob);
+          statusEl.textContent = "captured & sent at " + new Date().toLocaleTimeString();
+        },
+        "image/jpeg",
+        0.92
+      );
+    };
+  }
+
+  start().catch((err) => (statusEl.textContent = "error: " + err));
+</script>
+</body>
+</html>

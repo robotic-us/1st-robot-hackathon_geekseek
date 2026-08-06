@@ -1,0 +1,16 @@
+runtime:
+  robot: rviz
+  capture: webapp
+  move_seconds: 1.2
+  capture_seconds: 0.2
+
+verification:
+  vlm_enabled: false
+  timeout_seconds: 3
+  fail_open: true
+
+web:
+  host: 0.0.0.0
+  port: 8443
+  ssl_keyfile: certs/key.pem
+  ssl_certfile: certs/cert.pem

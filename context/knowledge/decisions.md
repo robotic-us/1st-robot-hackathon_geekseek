@@ -31,12 +31,12 @@
 | 로봇 없는 시각 검증 | STEP XCAF 조립 트리에서 5축 rigid 링크와 고정 키오스크/iPad/C270 메시를 생성하고 RViz fake node로 의미 포즈를 검증 | 로봇 팀 작업과 독립적으로 흐름 개발(2026-08-06) |
 | VLM 도입 방식 | VLM 없는 `LocalVerifier` 버전을 먼저 완성하고, 같은 `VERIFYING` 상태에 `VlmVerifier`를 선택적으로 연결 | 팀 결정(2026-08-06) |
 | VLM 실패 정책 | 정렬 완료 후보 프레임에 1회만 호출하고, 타임아웃·네트워크/API 오류 시 로컬 결과로 진행(`fail_open`) | 기본 촬영 경로 보호(2026-08-06) |
+| 엔드이펙터 폰 기종/연동 방식 | 아이폰 + Safari 웹앱. 폰이 HTTPS 페이지에서 `getUserMedia`로 카메라 스트림을 상시 유지하고, Jetson이 WebSocket으로 무음 원격 트리거 → 그 순간 프레임을 캡처해 업로드. iOS가 카메라 API를 HTTPS(또는 localhost)에서만 허용해서 자체서명 인증서가 필요(최초 1회 "이 웹사이트 방문" 수락) | Android IP Webcam 대비 화질 우위 확인, 원격 트리거 연속 3회 성공(2026-08-06) |
 
 ## 아직 열려 있는 것
 
 | 항목 | 확인 방법 | 담당 트랙 |
 |---|---|---|
-| 엔드이펙터 폰 기종 (아이폰 vs 안드로이드) | 아이폰 커스텀 미니앱 / Pushcut 웹훅 둘 다 짧게 검증 → 안 되면 안드로이드+IP Webcam으로 전환 | [work/C-eef-camera-shutter](../work/C-eef-camera-shutter/README.md) |
 | Jetson·iPad·폰 동일 네트워크 확보 | 현장 Wi-Fi/핫스팟으로 Safari 풀스크린 접속 테스트 | [work/D-kiosk-web-server](../work/D-kiosk-web-server/README.md) |
 | 제품 인식 범위 | 손 키포인트 근접도로 단순화 vs 별도 객체 탐지 — §8 파이프라인 자리잡은 뒤 결정 | [work/B-perception-skeleton](../work/B-perception-skeleton/README.md) |
 
