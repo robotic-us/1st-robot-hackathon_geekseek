@@ -6,6 +6,10 @@
 
 ## 2026-08-06
 
+- `RvizRobot`을 시간 기반 완료 추정에서 `completed:<pose>` 피드백 대기로 변경. ROS CLI subprocess에서도
+  Conda가 `PYTHONPATH`를 덮어쓰지 않도록 Humble Python 경로를 명시적으로 보존.
+- RViz fake node에 카메라 촬영 방향과 현재 포즈/이동 상태 Marker, headless launch 옵션을 추가하고 실제
+  ROS 노드와 앱 어댑터의 완료 왕복을 검증.
 - FastAPI에 `/face`, `/guide`, `/debug`, `/events`와 구도 선택·수동 정렬·재촬영·확정 API를 추가.
   SSE로 두 화면이 같은 `WorkflowContext`를 실시간 반영하며, fake 사진도 리뷰 화면에 표시.
 - 실제 Uvicorn에서 페이지/API 200 응답, `ready → guiding → reviewing` HTTP 흐름, SSE 초기 이벤트를 확인.

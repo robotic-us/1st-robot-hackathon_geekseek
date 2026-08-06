@@ -239,6 +239,9 @@ Capture HTTP
   모델은 실제 6개 액추에이터와 약 0.44m 높이를 반영한 primitive URDF를 사용한다.
 - `/geekseek/fake_robot/target`에는 `frame.full_body`, `frame.upper_body`,
   `frame.product_closeup` 같은 의미 기반 포즈만 전달한다.
+- `RvizRobot`은 고정 지연을 추측하지 않고 `/geekseek/fake_robot/status`의
+  `completed:<pose>`를 받은 뒤에만 `ROBOT_COMPLETED`를 발생시킨다.
+- RViz에는 `camera_link` 기준 촬영 방향 화살표와 현재 의미 포즈·이동 상태 라벨을 표시한다.
 - 링크별 CAD 메시가 정리되면 토픽·상태 머신·포즈 이름은 그대로 두고 URDF `visual`만 교체한다.
 
 ## 실행 프로필

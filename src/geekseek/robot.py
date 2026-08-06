@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Protocol
 
 
@@ -19,7 +20,7 @@ class FakeRobot:
 
 
 class RvizRobot(FakeRobot):
-    """Thin ROS boundary: publish a semantic pose without importing rclpy."""
+    """Thin ROS boundary that waits for the simulator's completion feedback."""
 
     def __init__(self, move_seconds: float = 1.2, ros2: str = "/opt/ros/humble/bin/ros2") -> None:
         super().__init__(move_seconds)
@@ -27,8 +28,24 @@ class RvizRobot(FakeRobot):
 
     async def move_to(self, pose: str) -> None:
         self.moves.append(pose)
+        environment = self._ros_environment()
+        completion = f"completed:{pose}"
+        status_process = await asyncio.create_subprocess_exec(
+            self.ros2,
+            "topic",
+            "echo",
+            "/geekseek/fake_robot/status",
+            "std_msgs/msg/String",
+            "--filter",
+            f"m.data == '{completion}'",
+            "--once",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            env=environment,
+        )
+
         payload = f"{{data: '{pose}'}}"
-        process = await asyncio.create_subprocess_exec(
+        publish_process = await asyncio.create_subprocess_exec(
             self.ros2,
             "topic",
             "pub",
@@ -38,16 +55,50 @@ class RvizRobot(FakeRobot):
             payload,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
+            env=environment,
         )
         try:
-            _, stderr = await asyncio.wait_for(process.communicate(), timeout=3.0)
+            _, publish_stderr = await asyncio.wait_for(publish_process.communicate(), timeout=3.0)
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            raise RuntimeError("RViz fake robot command timed out")
-        if process.returncode:
-            raise RuntimeError(stderr.decode().strip() or "RViz fake robot command failed")
-        await asyncio.sleep(self.move_seconds)
+            await self._terminate(status_process)
+            publish_process.kill()
+            await publish_process.wait()
+            raise RuntimeError("RViz fake robot has no target subscriber")
+        if publish_process.returncode:
+            await self._terminate(status_process)
+            raise RuntimeError(publish_stderr.decode().strip() or "RViz fake robot command failed")
+
+        try:
+            _, status_stderr = await asyncio.wait_for(
+                status_process.communicate(),
+                timeout=max(5.0, self.move_seconds + 3.0),
+            )
+        except asyncio.TimeoutError:
+            await self._terminate(status_process)
+            raise RuntimeError(f"RViz fake robot did not complete {pose}")
+        if status_process.returncode:
+            raise RuntimeError(status_stderr.decode().strip() or "RViz feedback listener failed")
+
+    @staticmethod
+    async def _terminate(process: asyncio.subprocess.Process) -> None:
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+
+    @staticmethod
+    def _ros_environment() -> dict[str, str]:
+        environment = os.environ.copy()
+        required = [
+            "/opt/ros/humble/lib/python3.10/site-packages",
+            "/opt/ros/humble/local/lib/python3.10/dist-packages",
+        ]
+        current = environment.get("PYTHONPATH", "").split(os.pathsep)
+        environment["PYTHONPATH"] = os.pathsep.join(required + [item for item in current if item])
+        return environment
 
 
 def pose_for_template(template_id: str) -> str:

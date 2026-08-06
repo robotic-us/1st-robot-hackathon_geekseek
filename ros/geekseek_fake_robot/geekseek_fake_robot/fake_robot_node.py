@@ -7,6 +7,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
+from visualization_msgs.msg import Marker
 
 
 JOINT_NAMES = [
@@ -34,6 +35,9 @@ class FakeRobotNode(Node):
         self.move_seconds = float(self.get_parameter("move_seconds").value)
         self.publisher = self.create_publisher(JointState, "/joint_states", 10)
         self.status_publisher = self.create_publisher(String, "/geekseek/fake_robot/status", 10)
+        self.marker_publisher = self.create_publisher(
+            Marker, "/geekseek/fake_robot/debug_marker", 10
+        )
         self.create_subscription(String, "/geekseek/fake_robot/target", self.on_target, 10)
         self.timer = self.create_timer(1.0 / 30.0, self.tick)
 
@@ -72,10 +76,47 @@ class FakeRobotNode(Node):
         message.name = JOINT_NAMES
         message.position = self.current
         self.publisher.publish(message)
+        self.publish_debug_markers(message.header.stamp)
 
         if ratio >= 1.0 and not self.completed:
             self.completed = True
             self.status_publisher.publish(String(data=f"completed:{self.active_pose}"))
+
+    def publish_debug_markers(self, stamp) -> None:
+        camera = Marker()
+        camera.header.frame_id = "camera_link"
+        camera.header.stamp = stamp
+        camera.ns = "camera_direction"
+        camera.id = 0
+        camera.type = Marker.ARROW
+        camera.action = Marker.ADD
+        camera.pose.orientation.w = 1.0
+        camera.scale.x = 0.24
+        camera.scale.y = 0.025
+        camera.scale.z = 0.025
+        camera.color.r = 0.3
+        camera.color.g = 0.9
+        camera.color.b = 1.0
+        camera.color.a = 0.9
+        self.marker_publisher.publish(camera)
+
+        label = Marker()
+        label.header.frame_id = "base_link"
+        label.header.stamp = stamp
+        label.ns = "active_pose"
+        label.id = 1
+        label.type = Marker.TEXT_VIEW_FACING
+        label.action = Marker.ADD
+        label.pose.position.z = 0.55
+        label.pose.orientation.w = 1.0
+        label.scale.z = 0.045
+        label.color.r = 1.0
+        label.color.g = 1.0 if self.completed else 0.65
+        label.color.b = 1.0 if self.completed else 0.15
+        label.color.a = 1.0
+        phase = "READY" if self.completed else "MOVING"
+        label.text = f"{phase} · {self.active_pose}"
+        self.marker_publisher.publish(label)
 
 
 def main(args=None) -> None:

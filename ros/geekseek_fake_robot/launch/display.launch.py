@@ -1,6 +1,8 @@
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.substitutions import Command
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 import os
@@ -14,6 +16,8 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument("move_seconds", default_value="1.2"),
+            DeclareLaunchArgument("use_rviz", default_value="true"),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -22,12 +26,20 @@ def generate_launch_description() -> LaunchDescription:
             Node(
                 package="geekseek_fake_robot",
                 executable="fake_robot_node",
+                parameters=[
+                    {
+                        "move_seconds": ParameterValue(
+                            LaunchConfiguration("move_seconds"), value_type=float
+                        )
+                    }
+                ],
                 output="screen",
             ),
             Node(
                 package="rviz2",
                 executable="rviz2",
                 arguments=["-d", rviz_file],
+                condition=IfCondition(LaunchConfiguration("use_rviz")),
                 output="screen",
             ),
         ]

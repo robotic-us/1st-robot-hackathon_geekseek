@@ -19,6 +19,11 @@ Visualization Manager:
     - Class: rviz_default_plugins/TF
       Name: TF
       Value: true
+    - Class: rviz_default_plugins/Marker
+      Marker Topic:
+        Value: /geekseek/fake_robot/debug_marker
+      Name: Camera Direction and Pose
+      Value: true
   Global Options:
     Background Color: 28; 30; 36
     Fixed Frame: base_link
