@@ -27,7 +27,7 @@ C270 프레임에서 경량 pose(스켈레톤) 모델로 키포인트를 뽑고,
    }
    ```
 4. 정렬 점수 함수: 각 목표 키포인트가 목표 zone 중심에서 얼마나 벗어났는지 거리로 계산해 0~1로 정규화,
-   가중 평균. (`../architecture/camera-robot-architecture.html` §8 파이프라인 요약 참고)
+   가중 평균. (`../../knowledge/architecture/camera-robot-architecture.html` §8 파이프라인 요약 참고)
 5. 디버그 시각화: 스켈레톤 + 목표 zone 박스 + 정렬 화살표를 프레임에 그려서 창에 띄우기 — 이게 그대로
    나중에 D트랙(iPad2 AR 가이드 스트림)에 재사용됨.
 
@@ -38,8 +38,12 @@ C270 프레임에서 경량 pose(스켈레톤) 모델로 키포인트를 뽑고,
 
 ## 다음 단계(완료 후, P1~P2)
 - 여러 템플릿 지원(전신/상반신/제품 클로즈업) + iPad1에서 고른 템플릿과 연동.
-- "제품을 들었는가" 판단(손 키포인트 근접도 우선, 필요시 객체 탐지 추가 — `../decisions.md` 열린 항목).
+- "제품을 들었는가" 판단(손 키포인트 근접도 우선, 필요시 객체 탐지 추가 — `../../knowledge/decisions.md` 열린 항목).
 - SAM2/MobileSAM으로 정렬 완료 시 1회 최종 검증(실루엣 깔끔한지, 다른 사람 안 끼어들었는지).
 
 ## 참고
-- `../architecture/camera-robot-architecture.html` §8, §9
+- `../../knowledge/architecture/camera-robot-architecture.html` §8, §9
+
+## 진행 기록
+"현재 상태"를 바꿀 정도의 진전이 있으면 `../../progress/log/`에 날짜별로 한 줄 남기고,
+`../../progress/STATUS.md`의 이 트랙 행도 같이 갱신하세요. 세부 메모는 이 폴더의 `NOTES.md`에.

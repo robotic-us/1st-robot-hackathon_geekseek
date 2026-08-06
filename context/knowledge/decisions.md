@@ -26,6 +26,11 @@
 
 | 항목 | 확인 방법 | 담당 트랙 |
 |---|---|---|
-| 엔드이펙터 폰 기종 (아이폰 vs 안드로이드) | 아이폰 커스텀 미니앱 / Pushcut 웹훅 둘 다 짧게 검증 → 안 되면 안드로이드+IP Webcam으로 전환 | [tasks/C-eef-camera-shutter.md](tasks/C-eef-camera-shutter.md) |
-| Jetson·iPad·폰 동일 네트워크 확보 | 현장 Wi-Fi/핫스팟으로 Safari 풀스크린 접속 테스트 | [tasks/D-kiosk-web-server.md](tasks/D-kiosk-web-server.md) |
-| 제품 인식 범위 | 손 키포인트 근접도로 단순화 vs 별도 객체 탐지 — §8 파이프라인 자리잡은 뒤 결정 | [tasks/B-perception-skeleton.md](tasks/B-perception-skeleton.md) |
+| 엔드이펙터 폰 기종 (아이폰 vs 안드로이드) | 아이폰 커스텀 미니앱 / Pushcut 웹훅 둘 다 짧게 검증 → 안 되면 안드로이드+IP Webcam으로 전환 | [work/C-eef-camera-shutter](../work/C-eef-camera-shutter/README.md) |
+| Jetson·iPad·폰 동일 네트워크 확보 | 현장 Wi-Fi/핫스팟으로 Safari 풀스크린 접속 테스트 | [work/D-kiosk-web-server](../work/D-kiosk-web-server/README.md) |
+| 제품 인식 범위 | 손 키포인트 근접도로 단순화 vs 별도 객체 탐지 — §8 파이프라인 자리잡은 뒤 결정 | [work/B-perception-skeleton](../work/B-perception-skeleton/README.md) |
+
+## 새 결정을 추가할 때
+한 줄로: **무엇을 / 왜 / 언제(날짜) / 누가**. 근거가 대화뿐이면 "팀 확인(YYYY-MM-DD)"이라고 적고,
+자세한 맥락은 [`../progress/log/`](../progress/log/)의 해당 날짜 항목에 남겨서 나중에 "왜 이렇게
+했지?"를 추적할 수 있게 하세요.

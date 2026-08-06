@@ -3,7 +3,7 @@
 ## 목표
 Jetson에 로컬 웹서버(FastAPI 권장)를 띄우고, iPad 2대가 각자 지정된 페이지를 Safari
 풀스크린(가이드 접근 모드)으로 표시하는 것까지 확인한다. 네이티브 iOS 앱은 만들지 않는다
-(`../decisions.md` 확정 사항).
+(`../../knowledge/decisions.md` 확정 사항).
 
 ## 왜 지금 이걸 해두면 좋은가
 현장 Wi-Fi/기기 조합에서 막히는 지점(방화벽, mDNS, 핫스팟 격리 등)은 실제로 붙여보기 전엔 모른다.
@@ -32,4 +32,8 @@ Jetson에 로컬 웹서버(FastAPI 권장)를 띄우고, iPad 2대가 각자 지
 - 현장 네트워크 조건(핫스팟/공유기)에서 접속 테스트를 최소 1회 완료.
 
 ## 참고
-- `../architecture/camera-robot-architecture.html` §2(iPad↔Jetson 연동), §3(시스템 다이어그램의 "키오스크 서버")
+- `../../knowledge/architecture/camera-robot-architecture.html` §2(iPad↔Jetson 연동), §3(시스템 다이어그램의 "키오스크 서버")
+
+## 진행 기록
+"현재 상태"를 바꿀 정도의 진전이 있으면 `../../progress/log/`에 날짜별로 한 줄 남기고,
+`../../progress/STATUS.md`의 이 트랙 행도 같이 갱신하세요. 세부 메모는 이 폴더의 `NOTES.md`에.
