@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Geekseek iPad 1 · Face Mock</title>
-  <link rel="stylesheet" href="mock.css">
+  <link rel="stylesheet" href="/static/mock.css">
 </head>
 <body>
   <main class="kiosk mock-kiosk face-mock">
@@ -37,11 +37,10 @@
     <footer class="mock-footer">
       <span id="stage-title">사람을 기다리는 중</span>
       <nav class="mock-controls" aria-label="개발용 단계 제어">
-        <button id="prev-stage" class="control-secondary" type="button" aria-label="이전 단계">←</button>
-        <button id="next-stage" class="control-primary" type="button">다음 단계 <span>→</span></button>
+        <button id="next-stage" class="control-primary" type="button" disabled>자동 진행 대기 중 <span>·</span></button>
       </nav>
     </footer>
   </main>
-  <script src="mock.js"></script>
+  <script src="/static/mock.js"></script>
 </body>
 </html>

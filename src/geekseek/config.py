@@ -13,13 +13,12 @@ class RuntimeConfig:
     capture: str = "fake"
     move_seconds: float = 0.2
     capture_seconds: float = 0.2
-
-
-@dataclass(frozen=True)
-class VerificationConfig:
-    vlm_enabled: bool = False
-    timeout_seconds: float = 3.0
-    fail_open: bool = True
+    person_sensor: str = "fake"
+    camera_index: int = 0
+    sense_interval: float = 0.2
+    greeting_seconds: float = 3.0
+    preview_seconds: float = 3.0
+    farewell_seconds: float = 4.0
 
 
 @dataclass(frozen=True)
@@ -33,7 +32,6 @@ class WebConfig:
 @dataclass(frozen=True)
 class AppConfig:
     runtime: RuntimeConfig = RuntimeConfig()
-    verification: VerificationConfig = VerificationConfig()
     web: WebConfig = WebConfig()
 
 
@@ -41,6 +39,5 @@ def load_config(path: str | Path) -> AppConfig:
     raw: dict[str, Any] = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     return AppConfig(
         runtime=RuntimeConfig(**raw.get("runtime", {})),
-        verification=VerificationConfig(**raw.get("verification", {})),
         web=WebConfig(**raw.get("web", {})),
     )

@@ -3,11 +3,8 @@ runtime:
   capture: webapp
   move_seconds: 1.2
   capture_seconds: 0.2
-
-verification:
-  vlm_enabled: false
-  timeout_seconds: 3
-  fail_open: true
+  person_sensor: mediapipe
+  camera_index: 0
 
 web:
   host: 0.0.0.0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +15,8 @@ from .workflow import EventType, State
 
 
 WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+
+_VALID_TEMPLATES = {"full_body", "upper_body", "product_closeup"}
 
 
 def create_app(coordinator: Coordinator) -> FastAPI:
@@ -55,15 +58,42 @@ def create_app(coordinator: Coordinator) -> FastAPI:
 
     @app.get("/face", include_in_schema=False)
     async def face() -> FileResponse:
-        return FileResponse(WEB_ROOT / "face.html")
+        return FileResponse(WEB_ROOT / "face-mock.html")
 
     @app.get("/guide", include_in_schema=False)
     async def guide() -> FileResponse:
-        return FileResponse(WEB_ROOT / "guide.html")
+        return FileResponse(WEB_ROOT / "guide-mock.html")
 
     @app.get("/debug", include_in_schema=False)
     async def debug() -> FileResponse:
         return FileResponse(WEB_ROOT / "debug.html")
+
+    def _mjpeg_stream(get_frame):
+        async def stream():
+            boundary = b"--frame\r\n"
+            while True:
+                frame = get_frame()
+                if frame:
+                    yield boundary + b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+                await asyncio.sleep(0.15)
+
+        return StreamingResponse(
+            stream(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    if coordinator.person_sensor is not None and hasattr(coordinator.person_sensor, "annotate_jpeg"):
+
+        @app.get("/debug/webcam", include_in_schema=False)
+        async def debug_webcam() -> StreamingResponse:
+            return _mjpeg_stream(lambda: coordinator.debug_frame)
+
+    if coordinator.person_sensor is not None and hasattr(coordinator.person_sensor, "mirror_jpeg"):
+
+        @app.get("/live/camera", include_in_schema=False)
+        async def live_camera() -> StreamingResponse:
+            return _mjpeg_stream(lambda: coordinator.live_frame)
 
     @app.get("/api/state")
     async def get_state() -> dict[str, object]:
@@ -80,27 +110,28 @@ def create_app(coordinator: Coordinator) -> FastAPI:
         await coordinator.wait_for_revision(revision + 1)
         return coordinator.context.as_dict()
 
-    @app.post("/api/template/{template_id}")
-    async def select_template(template_id: str) -> dict[str, object]:
-        if template_id not in {"full_body", "upper_body", "product_closeup"}:
-            raise HTTPException(status_code=404, detail="unknown template")
+    @app.post("/api/capture-started")
+    async def capture_started(payload: dict[str, str]) -> dict[str, object]:
+        template_id = payload.get("template_id", "")
+        if template_id not in _VALID_TEMPLATES:
+            raise HTTPException(status_code=422, detail="unknown template_id")
         return await emit(
-            EventType.TEMPLATE_SELECTED,
-            {State.READY},
+            EventType.CAPTURE_STARTED,
+            {State.DECIDING},
             template_id=template_id,
         )
 
-    @app.post("/api/alignment-ready")
-    async def alignment_ready() -> dict[str, object]:
-        return await emit(EventType.ALIGNMENT_STABLE, {State.GUIDING})
+    @app.post("/api/decline")
+    async def decline() -> dict[str, object]:
+        return await emit(EventType.DECLINED, {State.DECIDING})
 
-    @app.post("/api/retake")
-    async def retake() -> dict[str, object]:
-        return await emit(EventType.RETAKE_REQUESTED, {State.REVIEWING})
+    @app.post("/api/replay")
+    async def replay() -> dict[str, object]:
+        return await emit(EventType.REPLAY_REQUESTED, {State.ASKING})
 
-    @app.post("/api/accept")
-    async def accept() -> dict[str, object]:
-        return await emit(EventType.PHOTO_ACCEPTED, {State.REVIEWING})
+    @app.post("/api/liked")
+    async def liked() -> dict[str, object]:
+        return await emit(EventType.PHOTO_LIKED, {State.ASKING})
 
     @app.post("/api/reset")
     async def reset() -> dict[str, object]:

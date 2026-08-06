@@ -7,27 +7,30 @@ from typing import Any
 
 class State(str, Enum):
     BOOTING = "booting"
-    READY = "ready"
-    REPOSITIONING = "repositioning"
-    GUIDING = "guiding"
-    VERIFYING = "verifying"
-    CAPTURING = "capturing"
-    REVIEWING = "reviewing"
+    WAITING = "waiting"  # 1단계: 사람이 지나다니고 있음
+    GREETING = "greeting"  # 2단계: 사람이 가까이 다가옴
+    DECIDING = "deciding"  # 3단계: 촬영 여부/구도 결정
+    GUIDING = "guiding"  # 4단계: 촬영 시작, 위치로 유도
+    CAPTURING = "capturing"  # 5단계: 정위치 도달, 버스트 촬영
+    PREVIEWING = "previewing"  # 6단계: 촬영 끝, 슬라이드로 보여줌
+    ASKING = "asking"  # 7단계: 마음에 드는지 확인
+    FAREWELL = "farewell"  # 8단계: 인사, 자리 뜸
     ERROR = "error"
 
 
 class EventType(str, Enum):
     SYSTEM_READY = "system_ready"
-    TEMPLATE_SELECTED = "template_selected"
-    ROBOT_COMPLETED = "robot_completed"
-    ROBOT_FAILED = "robot_failed"
-    ALIGNMENT_STABLE = "alignment_stable"
-    VERIFICATION_PASSED = "verification_passed"
-    VERIFICATION_FAILED = "verification_failed"
-    CAPTURE_SUCCEEDED = "capture_succeeded"
+    PERSON_APPROACHED = "person_approached"
+    GREETING_DONE = "greeting_done"
+    CAPTURE_STARTED = "capture_started"
+    DECLINED = "declined"
+    POSITION_REACHED = "position_reached"
+    BURST_COMPLETE = "burst_complete"
     CAPTURE_FAILED = "capture_failed"
-    RETAKE_REQUESTED = "retake_requested"
-    PHOTO_ACCEPTED = "photo_accepted"
+    PREVIEW_DONE = "preview_done"
+    REPLAY_REQUESTED = "replay_requested"
+    PHOTO_LIKED = "photo_liked"
+    FAREWELL_DONE = "farewell_done"
     RESET_REQUESTED = "reset_requested"
 
 
@@ -41,7 +44,7 @@ class Event:
 class WorkflowContext:
     state: State = State.BOOTING
     template_id: str | None = None
-    photo_url: str | None = None
+    photos: list[str] = field(default_factory=list)
     hint: str = ""
     error: str = ""
     revision: int = 0
@@ -57,18 +60,19 @@ class InvalidTransition(ValueError):
 
 
 _TRANSITIONS: dict[tuple[State, EventType], State] = {
-    (State.BOOTING, EventType.SYSTEM_READY): State.READY,
-    (State.READY, EventType.TEMPLATE_SELECTED): State.REPOSITIONING,
-    (State.REPOSITIONING, EventType.ROBOT_COMPLETED): State.GUIDING,
-    (State.REPOSITIONING, EventType.ROBOT_FAILED): State.ERROR,
-    (State.GUIDING, EventType.ALIGNMENT_STABLE): State.VERIFYING,
-    (State.VERIFYING, EventType.VERIFICATION_PASSED): State.CAPTURING,
-    (State.VERIFYING, EventType.VERIFICATION_FAILED): State.GUIDING,
-    (State.CAPTURING, EventType.CAPTURE_SUCCEEDED): State.REVIEWING,
+    (State.BOOTING, EventType.SYSTEM_READY): State.WAITING,
+    (State.WAITING, EventType.PERSON_APPROACHED): State.GREETING,
+    (State.GREETING, EventType.GREETING_DONE): State.DECIDING,
+    (State.DECIDING, EventType.CAPTURE_STARTED): State.GUIDING,
+    (State.DECIDING, EventType.DECLINED): State.WAITING,
+    (State.GUIDING, EventType.POSITION_REACHED): State.CAPTURING,
+    (State.CAPTURING, EventType.BURST_COMPLETE): State.PREVIEWING,
     (State.CAPTURING, EventType.CAPTURE_FAILED): State.ERROR,
-    (State.REVIEWING, EventType.RETAKE_REQUESTED): State.GUIDING,
-    (State.REVIEWING, EventType.PHOTO_ACCEPTED): State.READY,
-    (State.ERROR, EventType.RESET_REQUESTED): State.READY,
+    (State.PREVIEWING, EventType.PREVIEW_DONE): State.ASKING,
+    (State.ASKING, EventType.REPLAY_REQUESTED): State.PREVIEWING,
+    (State.ASKING, EventType.PHOTO_LIKED): State.FAREWELL,
+    (State.FAREWELL, EventType.FAREWELL_DONE): State.WAITING,
+    (State.ERROR, EventType.RESET_REQUESTED): State.WAITING,
 }
 
 
@@ -79,22 +83,20 @@ def apply_event(context: WorkflowContext, event: Event) -> None:
     except KeyError as exc:
         raise InvalidTransition(f"{event.type.value} is invalid in {context.state.value}") from exc
 
-    if event.type is EventType.TEMPLATE_SELECTED:
+    if event.type is EventType.CAPTURE_STARTED:
         template_id = str(event.data.get("template_id", "")).strip()
         if not template_id:
             raise InvalidTransition("template_id is required")
         context.template_id = template_id
-        context.photo_url = None
+        context.photos = []
         context.hint = ""
-    elif event.type is EventType.VERIFICATION_FAILED:
-        context.hint = str(event.data.get("hint", "구도를 다시 맞춰 주세요."))
-    elif event.type is EventType.CAPTURE_SUCCEEDED:
-        context.photo_url = str(event.data["photo_url"])
-    elif event.type in (EventType.ROBOT_FAILED, EventType.CAPTURE_FAILED):
+    elif event.type is EventType.BURST_COMPLETE:
+        context.photos = list(event.data.get("photos", []))
+    elif event.type is EventType.CAPTURE_FAILED:
         context.error = str(event.data.get("reason", "unknown error"))
-    elif event.type in (EventType.PHOTO_ACCEPTED, EventType.RESET_REQUESTED):
+    elif event.type in (EventType.DECLINED, EventType.FAREWELL_DONE, EventType.RESET_REQUESTED):
         context.template_id = None
-        context.photo_url = None
+        context.photos = []
         context.hint = ""
         context.error = ""
 

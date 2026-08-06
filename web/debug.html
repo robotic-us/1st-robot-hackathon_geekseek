@@ -13,13 +13,19 @@
       <div>
         <p class="eyebrow">WORKFLOW</p><h1 id="headline">상태 머신</h1><p id="message"></p>
         <div class="debug-buttons">
-          <button data-template="full_body">전신 선택</button><button data-template="upper_body">상반신 선택</button>
-          <button data-template="product_closeup">제품 선택</button><button id="align" class="primary">정렬 완료</button>
-          <button id="retake">재촬영</button><button id="accept" class="primary">사진 확정</button><button id="reset">오류 초기화</button>
+          <button data-template="full_body">전신으로 촬영 시작</button><button data-template="upper_body">상반신으로 촬영 시작</button>
+          <button data-template="product_closeup">제품 클로즈업으로 촬영 시작</button><button id="decline">거절</button>
+          <button id="replay">다시 보기</button><button id="liked" class="primary">마음에 들어요</button><button id="reset">초기화</button>
         </div>
+        <p class="eyebrow">PHOTOS</p><ul id="photos"><li>아직 촬영된 사진이 없습니다.</li></ul>
         <nav><a href="/face" target="_blank">iPad 1 화면</a><a href="/guide" target="_blank">iPad 2 화면</a><a href="/docs" target="_blank">API 문서</a></nav>
       </div>
-      <pre id="debug-json">연결 중…</pre>
+      <div>
+        <pre id="debug-json">연결 중…</pre>
+        <p class="eyebrow">WEBCAM (person_sensor: mediapipe일 때만)</p>
+        <img id="webcam-debug" src="/debug/webcam" alt="웹캠 인식 디버그" style="width:100%;border-radius:16px;border:1px solid #31384d;"
+             onerror="this.replaceWith(Object.assign(document.createElement('p'),{textContent:'웹캠 디버그 스트림 없음 (person_sensor: fake)',style:'color:#737b91'}))">
+      </div>
     </section>
     <footer>촬영 상태 <code id="state">booting</code></footer>
   </main>

@@ -107,3 +107,11 @@ def pose_for_template(template_id: str) -> str:
         "upper_body": "frame.upper_body",
         "product_closeup": "frame.product_closeup",
     }.get(template_id, "frame.full_body")
+
+
+def burst_poses_for_template(template_id: str) -> list[str]:
+    """5단계: 정위치에서 여러 구도로 팔을 움직이며 촬영. 고른 구도를 먼저 찍고
+    나머지 두 구도를 이어서 찍는다."""
+    all_poses = ["frame.full_body", "frame.upper_body", "frame.product_closeup"]
+    first = pose_for_template(template_id)
+    return [first] + [pose for pose in all_poses if pose != first]

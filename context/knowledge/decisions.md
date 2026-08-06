@@ -25,13 +25,14 @@
 | GaP 판단 실행 방식 | 전체를 2Hz 폴링하지 않고 이벤트 발생 즉시 전이. 2Hz/타이머는 BUSY 재시도·안전 확인에만 사용 | 반응성·단순성 확보(2026-08-06) |
 | 상태 관리 | `Coordinator`만 `WorkflowContext`를 변경하는 단일 작성자 구조 | 레이스 방지·테스트 용이성(2026-08-06) |
 | ROS 2 사용 범위 | phorce 모션/피드백 경계에서만 사용. Pose·웹·폰·상태 머신은 일반 Python | 로봇 SDK 격리(2026-08-06) |
-| 구현 모듈 구조 | 초기에는 `workflow/coordinator/perception/verification/robot/capture/web/config` 중심의 작은 모듈 구성. 실제로 커질 때만 분리 | 과설계 방지(2026-08-06) |
+| 구현 모듈 구조 | 초기에는 `workflow/coordinator/perception/robot/capture/web/config` 중심의 작은 모듈 구성(`verification`은 2026-08-07 워크플로 재작성 때 제거). 실제로 커질 때만 분리 | 과설계 방지(2026-08-06) |
 | 하드웨어 교체 방식 | Robot·Capture·Camera/Pose 경계만 작은 인터페이스로 격리하고 fake/실제 구현을 설정으로 선택 | 노트북 선행 개발·확장성(2026-08-06) |
 | 개발 프로필 | `dev`에서 fake/녹화 영상으로 전체 흐름 검증 후 `jetson`에서 실제 구현체 교체 | Jetson 전 최대 개발(2026-08-06) |
 | 로봇 없는 시각 검증 | STEP XCAF 조립 트리에서 5축 rigid 링크와 고정 키오스크/iPad/C270 메시를 생성하고 RViz fake node로 의미 포즈를 검증 | 로봇 팀 작업과 독립적으로 흐름 개발(2026-08-06) |
-| VLM 도입 방식 | VLM 없는 `LocalVerifier` 버전을 먼저 완성하고, 같은 `VERIFYING` 상태에 `VlmVerifier`를 선택적으로 연결 | 팀 결정(2026-08-06) |
-| VLM 실패 정책 | 정렬 완료 후보 프레임에 1회만 호출하고, 타임아웃·네트워크/API 오류 시 로컬 결과로 진행(`fail_open`) | 기본 촬영 경로 보호(2026-08-06) |
+| ~~VLM 도입 방식~~ | ~~VLM 없는 `LocalVerifier` 버전을 먼저 완성하고, 같은 `VERIFYING` 상태에 `VlmVerifier`를 선택적으로 연결~~ → 2026-08-07에 폐기, 아래 "워크플로 8단계 재작성" 참고 | 팀 결정(2026-08-06) |
+| ~~VLM 실패 정책~~ | ~~정렬 완료 후보 프레임에 1회만 호출하고, 타임아웃·네트워크/API 오류 시 로컬 결과로 진행(`fail_open`)~~ → 2026-08-07에 폐기 | 기본 촬영 경로 보호(2026-08-06) |
 | 엔드이펙터 폰 기종/연동 방식 | 아이폰 + Safari 웹앱. 폰이 HTTPS 페이지에서 `getUserMedia`로 카메라 스트림을 상시 유지하고, Jetson이 WebSocket으로 무음 원격 트리거 → 그 순간 프레임을 캡처해 업로드. iOS가 카메라 API를 HTTPS(또는 localhost)에서만 허용해서 자체서명 인증서가 필요(최초 1회 "이 웹사이트 방문" 수락) | Android IP Webcam 대비 화질 우위 확인, 원격 트리거 연속 3회 성공(2026-08-06) |
+| 워크플로 8단계 재작성 | `BOOTING/READY/REPOSITIONING/GUIDING/VERIFYING/CAPTURING/REVIEWING`(VLM `Verifier` 포함) 구조를 폐기하고, `../knowledge/scenario-walkthrough.md`의 사용자 관점 8단계(waiting/greeting/deciding/guiding/capturing/previewing/asking/farewell)로 전면 교체. 정렬 확인은 VLM이 아니라 B트랙 웹캠(`is_approaching`/`is_positioned`)이 직접 담당 — 로봇은 5단계(버스트 촬영)에서만 움직이므로 `robot: fake`면 RViz 없이도 1~4단계 검증 가능 | 실제 스토리 우선 설계, 구현 단순화(2026-08-07) |
 
 ## 아직 열려 있는 것
 

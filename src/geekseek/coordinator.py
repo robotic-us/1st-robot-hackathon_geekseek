@@ -1,25 +1,45 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any, Coroutine
 
 from .capture import CaptureDevice
-from .robot import Robot, pose_for_template
-from .verification import Verifier
+from .perception import PersonSensor, PersonSignal, is_approaching, is_positioned
+from .robot import Robot, burst_poses_for_template
 from .workflow import Event, EventType, InvalidTransition, State, WorkflowContext, apply_event
+
+FrameSource = Callable[[], object | None]
 
 
 class Coordinator:
     """Single writer for workflow state and owner of background effects."""
 
-    def __init__(self, robot: Robot, capture: CaptureDevice, verifier: Verifier) -> None:
+    def __init__(
+        self,
+        robot: Robot,
+        capture: CaptureDevice,
+        person_sensor: PersonSensor | None = None,
+        frame_source: FrameSource | None = None,
+        sense_interval: float = 0.2,
+        greeting_seconds: float = 3.0,
+        preview_seconds: float = 3.0,
+        farewell_seconds: float = 4.0,
+    ) -> None:
         self.context = WorkflowContext()
         self.robot = robot
         self.capture = capture
-        self.verifier = verifier
+        self.person_sensor = person_sensor
+        self.frame_source = frame_source
+        self.sense_interval = sense_interval
+        self.greeting_seconds = greeting_seconds
+        self.preview_seconds = preview_seconds
+        self.farewell_seconds = farewell_seconds
+        self.debug_frame: bytes | None = None
+        self.live_frame: bytes | None = None
         self.events: asyncio.Queue[Event | None] = asyncio.Queue()
         self._runner: asyncio.Task[None] | None = None
+        self._sense_task: asyncio.Task[None] | None = None
         self._effects: set[asyncio.Task[None]] = set()
         self._subscribers: set[asyncio.Queue[dict[str, object]]] = set()
 
@@ -27,12 +47,18 @@ class Coordinator:
         if self._runner is not None:
             return
         self._runner = asyncio.create_task(self._run())
+        if self.person_sensor is not None:
+            self._sense_task = asyncio.create_task(self._sense_loop())
         await self.emit(EventType.SYSTEM_READY)
-        await self.wait_for_state(State.READY)
+        await self.wait_for_state(State.WAITING)
 
     async def stop(self) -> None:
         if self._runner is None:
             return
+        if self._sense_task is not None:
+            self._sense_task.cancel()
+            await asyncio.gather(self._sense_task, return_exceptions=True)
+            self._sense_task = None
         for task in self._effects:
             task.cancel()
         if self._effects:
@@ -76,12 +102,14 @@ class Coordinator:
             except InvalidTransition:
                 continue
             self._publish()
-            if self.context.state is State.REPOSITIONING:
-                self._spawn(self._move_robot())
-            elif self.context.state is State.VERIFYING:
-                self._spawn(self._verify())
+            if self.context.state is State.GREETING:
+                self._spawn(self._timer(EventType.GREETING_DONE, self.greeting_seconds))
             elif self.context.state is State.CAPTURING:
-                self._spawn(self._capture())
+                self._spawn(self._capture_burst())
+            elif self.context.state is State.PREVIEWING:
+                self._spawn(self._timer(EventType.PREVIEW_DONE, self.preview_seconds))
+            elif self.context.state is State.FAREWELL:
+                self._spawn(self._timer(EventType.FAREWELL_DONE, self.farewell_seconds))
 
     def _spawn(self, coroutine: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(coroutine)
@@ -95,29 +123,43 @@ class Coordinator:
                 queue.get_nowait()
             queue.put_nowait(snapshot)
 
-    async def _move_robot(self) -> None:
-        try:
-            await self.robot.move_to(pose_for_template(self.context.template_id or ""))
-        except Exception as exc:
-            await self.emit(EventType.ROBOT_FAILED, reason=str(exc))
-        else:
-            await self.emit(EventType.ROBOT_COMPLETED)
+    async def _timer(self, event_type: EventType, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+        await self.emit(event_type)
 
-    async def _verify(self) -> None:
-        try:
-            result = await self.verifier.verify(None, self.context)
-        except Exception as exc:
-            await self.emit(EventType.VERIFICATION_FAILED, hint=str(exc))
-            return
-        if result.passed:
-            await self.emit(EventType.VERIFICATION_PASSED)
-        else:
-            await self.emit(EventType.VERIFICATION_FAILED, hint=result.hint, reason=result.reason)
+    async def _sense_loop(self) -> None:
+        """Runs for the whole session; only acts when the current state cares
+        about a person signal (WAITING → 접근 감지, GUIDING → 정위치 확인)."""
+        while True:
+            await asyncio.sleep(self.sense_interval)
+            if self.person_sensor is None:
+                continue
+            if self.frame_source is not None:
+                frame = self.frame_source()
+                if frame is None:
+                    continue  # webcam hasn't produced a first frame yet
+            else:
+                frame = None
+            signal: PersonSignal = self.person_sensor.sense(frame)
+            approaching = is_approaching(signal)
+            positioned = is_positioned(signal)
+            if hasattr(self.person_sensor, "annotate_jpeg"):
+                self.debug_frame = self.person_sensor.annotate_jpeg(frame, signal, approaching, positioned)
+            if hasattr(self.person_sensor, "mirror_jpeg"):
+                self.live_frame = self.person_sensor.mirror_jpeg(frame)
+            if self.context.state is State.WAITING and approaching:
+                await self.emit(EventType.PERSON_APPROACHED)
+            elif self.context.state is State.GUIDING and positioned:
+                await self.emit(EventType.POSITION_REACHED)
 
-    async def _capture(self) -> None:
+    async def _capture_burst(self) -> None:
+        photos: list[str] = []
         try:
-            result = await self.capture.capture()
+            for pose in burst_poses_for_template(self.context.template_id or ""):
+                await self.robot.move_to(pose)
+                result = await self.capture.capture()
+                photos.append(result.photo_url)
         except Exception as exc:
             await self.emit(EventType.CAPTURE_FAILED, reason=str(exc))
         else:
-            await self.emit(EventType.CAPTURE_SUCCEEDED, photo_url=result.photo_url)
+            await self.emit(EventType.BURST_COMPLETE, photos=photos)

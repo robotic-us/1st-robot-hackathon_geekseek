@@ -11,16 +11,23 @@ Jetson에 로컬 웹서버(FastAPI 권장)를 띄우고, iPad 2대가 각자 지
 꽂을 수 있다.
 
 ## 현재 상태
-`진행 중 · FastAPI/SSE/iPad 1·2 화면 구현 완료`
+`진행 중 · 백엔드 8단계 상태 머신 + SSE 완료, 프런트 실연동은 Codex 작업 진행 중`
+
+2026-08-07에 워크플로를 `../../knowledge/scenario-walkthrough.md`의 사용자 관점 8단계
+(waiting/greeting/deciding/guiding/capturing/previewing/asking/farewell)로 전면 재작성했다.
+`/face`, `/guide`는 이제 옛날 `face.html`/`guide.html`이 아니라 Codex가 만든
+`face-mock.html`/`guide-mock.html`을 서빙한다 — 다만 그 파일들은 아직 로컬 JS 목업이라 SSE에
+안 붙어 있고, Codex한테 실연동 작업을 맡겨둔 상태.
 
 구현된 경로:
 
-- `/face`: 구도 3종 선택과 현재 상태 표시
-- `/guide`: 가이드 placeholder, 개발용 정렬 완료, fake 사진 리뷰·재촬영·확정
-- `/debug`: 전체 컨텍스트와 모든 개발용 제어
-- `/events`: `WorkflowContext` SSE 실시간 전송
+- `/face`, `/guide`: 8단계 목업 페이지 (실연동 진행 중)
+- `/debug`, `/api/state`, `/events`(SSE): 그대로, state/event 이름만 새 8단계로 갱신
+- `POST /api/capture-started` `{template_id}`, `/api/decline`, `/api/replay`, `/api/liked`, `/api/reset`
+  — 사람 접근/정위치 감지(B트랙 웹캠)는 HTTP 라우트 없이 코디네이터가 자체 감지 루프로 처리
 
-노트북의 실제 Uvicorn/API/SSE 왕복은 검증했다. 실제 iPad 2대의 Safari 접속과 MJPEG 영상 연결은 남아 있다.
+노트북의 실제 Uvicorn/API/SSE 왕복은 새 상태 머신 기준으로 재검증했다(`python3 -m geekseek --demo`,
+`pytest tests/` 29개 전부 통과). 실제 iPad 2대의 Safari 접속과 MJPEG 영상 연결은 남아 있다.
 
 ## 다음 단계
 1. ~~FastAPI 최소 서버와 상태 API 구현.~~

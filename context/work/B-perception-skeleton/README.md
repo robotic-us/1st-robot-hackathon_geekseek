@@ -17,10 +17,15 @@ C270 프레임에서 경량 pose(스켈레톤) 모델로 키포인트를 뽑고,
   걸러내고(`visibility` 기준) 좌표를 [0,1]로 clamp — 처음엔 사람이 없는데도 낮은 신뢰도 관절이 화면 밖으로
   튀어서 size_ratio가 1.8까지 나오는 버그가 있었고, 이 필터로 해결.
 - `is_approaching()` / `is_positioned()` — 시나리오 2단계(접근 감지)·4→5단계(정위치 확인)에 대응하는
-  임계값 판단 헬퍼. 아직 워크플로 상태 머신에는 연결 안 함(별도 결정 필요, 아래 참고).
+  임계값 판단 헬퍼. **2026-08-07에 `Coordinator._sense_loop()`로 연결 완료** — `waiting` 상태에서
+  `is_approaching()`이 참이면 `PERSON_APPROACHED`, `guiding` 상태에서 `is_positioned()`가 참이면
+  `POSITION_REACHED`를 코디네이터가 직접 emit. `config.runtime.person_sensor: mediapipe`로 켜짐.
+- `WebcamFrameSource` — cv2 웹캠 읽기가 블로킹이라 별도 스레드에서 계속 최신 프레임만 들고 있다가
+  비동기 sense 루프가 호출할 때 넘겨주는 어댑터. `app.py`가 `person_sensor: mediapipe`일 때 같이 만듦.
 - `FakePersonSensor` — 다른 트랙과 동일한 fake/real 분리 패턴, 테스트·dev용.
 - `scripts/test_webcam_perception.py` — 노트북 웹캠(C270 대신)으로 라이브 검증하는 독립 스크립트.
   실행 결과: 145프레임 전부 정상 감지, size_ratio 0.13~0.22·center 안정적으로 확인(2026-08-06).
+- `scripts/live_webcam_pose.py` — 스켈레톤 오버레이를 실시간 `cv2.imshow` 창으로 띄우는 스크립트(2026-08-07).
 
 ## 다음 단계
 1. ~~OpenCV/MediaPipe로 프레임에서 사람 신호 뽑기.~~ 완료 — 위 참고.
