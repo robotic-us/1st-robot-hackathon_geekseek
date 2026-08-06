@@ -17,6 +17,7 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             DeclareLaunchArgument("move_seconds", default_value="1.2"),
+            DeclareLaunchArgument("use_fake_robot", default_value="true"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             Node(
                 package="robot_state_publisher",
@@ -33,6 +34,7 @@ def generate_launch_description() -> LaunchDescription:
                         )
                     }
                 ],
+                condition=IfCondition(LaunchConfiguration("use_fake_robot")),
                 output="screen",
             ),
             Node(

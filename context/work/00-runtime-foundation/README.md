@@ -25,7 +25,8 @@
 
 현재 1~6의 코어와 웹, 7의 VLM 없는 happy path·재촬영·검증 거절 경로까지 구현했다. `/face`, `/guide`,
 `/debug`, `/events` 및 제어 API가 같은 `Coordinator`에 연결되어 있다. perception/MJPEG 연결과 fake VLM
-타임아웃 경로가 다음 작업이다. RViz 개발용 6관절 fake robot은 `ros/geekseek_fake_robot/`에 분리했다.
+타임아웃 경로가 다음 작업이다. RViz 개발용 STEP 기반 5축 fake robot과 고정 키오스크 모델은
+`ros/geekseek_fake_robot/`에 분리했다.
 
 ## 완료 기준
 

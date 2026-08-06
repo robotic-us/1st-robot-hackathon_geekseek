@@ -14,17 +14,16 @@ JOINT_NAMES = [
     "base_yaw_joint",
     "shoulder_pitch_joint",
     "elbow_pitch_joint",
-    "wrist_yaw_joint",
     "wrist_pitch_joint",
-    "camera_roll_joint",
+    "end_effector_yaw_joint",
 ]
 
 POSES = {
-    "home": (0, -15, 35, 0, -20, 0),
-    "frame.full_body": (0, 10, 30, 0, -40, 0),
-    "frame.upper_body": (-20, -5, 55, 10, -35, 0),
-    "frame.product_closeup": (25, -20, 70, -15, -25, 5),
-    "safe.retreat": (0, -35, 65, 0, -30, 0),
+    "home": (0, 0, 0, 0, 0),
+    "frame.full_body": (0, -10, 20, -10, 0),
+    "frame.upper_body": (-15, -20, 35, -15, 10),
+    "frame.product_closeup": (20, -30, 50, -25, -10),
+    "safe.retreat": (0, -25, 40, -15, 0),
 }
 
 
@@ -84,7 +83,7 @@ class FakeRobotNode(Node):
 
     def publish_debug_markers(self, stamp) -> None:
         camera = Marker()
-        camera.header.frame_id = "camera_link"
+        camera.header.frame_id = "end_effector_link"
         camera.header.stamp = stamp
         camera.ns = "camera_direction"
         camera.id = 0

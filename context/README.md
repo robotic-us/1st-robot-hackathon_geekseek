@@ -35,8 +35,8 @@ iPad 2대 + 엔드이펙터 카메라폰 + C270 웹캠으로 구성된, "핫플�
   설치돼 있습니다 (`knowledge/reference/sdk-docs/01-quickstart.html` 참고).
 - ROS 2 기반이므로 `qos_profile_sensor_data`로 피드백을 구독해야 합니다
   (`knowledge/reference/sdk-docs/03-manual.html` §6, §11 흔한 실수).
-- CAD 원본(iPad 거치대 STL, 로봇팔 STEP)은 용량 문제로 이 저장소엔 아직 커밋하지 않았습니다 — 필요하면
-  Git LFS를 붙이거나 별도 공유로 가져오세요. 원본 위치: `사진로봇/cad/`, `CAD/joints.step` (팀 데스크톱 폴더).
+- CAD 기준 원본은 `assets/cad/Assemble_CAM.step`, 재현 가능한 STL 생성기는
+  `tools/extract_step_links.py`, RViz용 생성 메시와 manifest는 `ros/geekseek_fake_robot/meshes/`에 있습니다.
 - **실제 소스 코드는 이 `context/` 폴더가 아니라 저장소 루트에** 둡니다(예: `src/`, `jetson/` 등,
   트랙 작업이 시작되면 새로 만들면 됨). `context/`는 지식·조율 계층이지 코드 저장소가 아닙니다.
 

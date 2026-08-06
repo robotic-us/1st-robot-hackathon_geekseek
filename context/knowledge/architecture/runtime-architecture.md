@@ -235,14 +235,15 @@ Capture HTTP
 ### RViz fake robot
 
 - CAD 원본은 `assets/cad/Assemble_CAM.step`에 그대로 보존한다.
-- STEP가 298개 솔리드로 평탄화되어 관절별 링크를 신뢰성 있게 자동 분리할 수 없으므로, 현재 RViz
-  모델은 실제 6개 액추에이터와 약 0.44m 높이를 반영한 primitive URDF를 사용한다.
+- OCP XCAF로 STEP 조립 트리와 부품명을 보존해 읽고, 5개 `phact-401` 중심축과
+  `holder_f`(고정측)·`holder_m`(출력측) 관계로 6개 rigid 링크 STL을 생성한다.
+- 최상위의 고정 키오스크 프레임·iPad·C270도 로봇 기준 좌표로 변환해 RViz에 함께 표시한다.
 - `/geekseek/fake_robot/target`에는 `frame.full_body`, `frame.upper_body`,
   `frame.product_closeup` 같은 의미 기반 포즈만 전달한다.
 - `RvizRobot`은 고정 지연을 추측하지 않고 `/geekseek/fake_robot/status`의
   `completed:<pose>`를 받은 뒤에만 `ROBOT_COMPLETED`를 발생시킨다.
-- RViz에는 `camera_link` 기준 촬영 방향 화살표와 현재 의미 포즈·이동 상태 라벨을 표시한다.
-- 링크별 CAD 메시가 정리되면 토픽·상태 머신·포즈 이름은 그대로 두고 URDF `visual`만 교체한다.
+- STEP AP214에는 URDF 관절 제약이 없으므로 축은 액추에이터 형상에서 추론한다. 실제 phorce 축 방향과
+  대조할 때도 토픽·상태 머신·의미 포즈 이름은 유지하고 URDF/포즈 매핑만 보정한다.
 
 ## 실행 프로필
 
@@ -257,7 +258,7 @@ PYTHONPATH="src:${PYTHONPATH}" python3 -m geekseek --config config/rviz.yaml
 | 프로필 | Camera/Pose | Robot | Capture |
 |---|---|---|---|
 | `dev` | 노트북 웹캠 또는 녹화 영상 | `FakeRobot` | `FakeCapture` |
-| `rviz` | fake 정렬 이벤트 | RViz 6관절 `RvizRobot` | `FakeCapture` |
+| `rviz` | fake 정렬 이벤트 | STEP 기반 RViz 5축 `RvizRobot` | `FakeCapture` |
 | `jetson` | C270 + Jetson용 추론기 | `PhorceRobot` | 실제 폰 HTTP |
 
 별도 DI 컨테이너나 플러그인 시스템 없이 `config.py`에서 설정값에 따라 클래스를 명시적으로 조립한다.

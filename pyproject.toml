@@ -14,6 +14,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cad = [
+  "cadquery>=2.8,<3",
+]
 dev = [
   "httpx>=0.28",
   "pytest>=8.0,<9",

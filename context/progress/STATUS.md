@@ -8,7 +8,8 @@
 ## 요약
 물리 구성(C270=인식 전용, iPad1=구도선택 UI, iPad2=AR가이드+키오스크, iPad↔Jetson=로컬 웹서버) 확정.
 상위 설계에 따라 런타임 구현 시작. 이벤트 상태 머신·`Coordinator`·`FakeRobot`·`FakeCapture`·
-`LocalVerifier`의 headless 전체 흐름과 테스트를 구현했고, STEP 원본 및 RViz 6관절 fake robot을 추가했다.
+`LocalVerifier`의 headless 전체 흐름과 테스트를 구현했고, STEP 원본에서 추출한 실제 형상의 RViz 5축
+fake robot과 고정 키오스크·iPad·C270 모델을 추가했다.
 FastAPI/SSE에 iPad 1 구도 선택, iPad 2 가이드·리뷰, PC 디버그 화면까지 연결했다. Pose·MJPEG·실제 폰
 촬영은 아직 연결 전이다.
 
@@ -16,7 +17,7 @@ FastAPI/SSE에 iPad 1 구도 선택, iPad 2 가이드·리뷰, PC 디버그 화�
 
 | 트랙 | 상태 | 비고 |
 |---|---|---|
-| [0. 런타임 공통 기반](../work/00-runtime-foundation/README.md) | 🟡 진행 중 | 코어·RViz·iPad fake 흐름 완료, 영상 연결이 다음 |
+| [0. 런타임 공통 기반](../work/00-runtime-foundation/README.md) | 🟡 진행 중 | 코어·STEP 기반 RViz·iPad fake 흐름 완료, 영상 연결이 다음 |
 | [A. 로봇 최소 왕복](../work/A-robot-motion-loop/README.md) | 🔴 시작 전 | P0 게이트 — 가장 먼저 되어야 함 |
 | [B. 스켈레톤 인식](../work/B-perception-skeleton/README.md) | 🔴 시작 전 | 로봇 없이 지금 바로 착수 가능 |
 | [C. 엔드이펙터 폰 셔터](../work/C-eef-camera-shutter/README.md) | 🔴 시작 전 | 아이폰 vs 안드로이드 — 오늘 결정 필요 |

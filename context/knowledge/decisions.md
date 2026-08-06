@@ -28,7 +28,7 @@
 | 구현 모듈 구조 | 초기에는 `workflow/coordinator/perception/verification/robot/capture/web/config` 중심의 작은 모듈 구성. 실제로 커질 때만 분리 | 과설계 방지(2026-08-06) |
 | 하드웨어 교체 방식 | Robot·Capture·Camera/Pose 경계만 작은 인터페이스로 격리하고 fake/실제 구현을 설정으로 선택 | 노트북 선행 개발·확장성(2026-08-06) |
 | 개발 프로필 | `dev`에서 fake/녹화 영상으로 전체 흐름 검증 후 `jetson`에서 실제 구현체 교체 | Jetson 전 최대 개발(2026-08-06) |
-| 로봇 없는 시각 검증 | STEP 원본은 저장소에 보존하고, 관절별 CAD 분리 전에는 실제 6축·전체 크기를 반영한 primitive URDF와 RViz fake node 사용 | 로봇 팀 작업과 독립적으로 흐름 개발(2026-08-06) |
+| 로봇 없는 시각 검증 | STEP XCAF 조립 트리에서 5축 rigid 링크와 고정 키오스크/iPad/C270 메시를 생성하고 RViz fake node로 의미 포즈를 검증 | 로봇 팀 작업과 독립적으로 흐름 개발(2026-08-06) |
 | VLM 도입 방식 | VLM 없는 `LocalVerifier` 버전을 먼저 완성하고, 같은 `VERIFYING` 상태에 `VlmVerifier`를 선택적으로 연결 | 팀 결정(2026-08-06) |
 | VLM 실패 정책 | 정렬 완료 후보 프레임에 1회만 호출하고, 타임아웃·네트워크/API 오류 시 로컬 결과로 진행(`fail_open`) | 기본 촬영 경로 보호(2026-08-06) |
 

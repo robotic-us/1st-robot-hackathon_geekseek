@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 
@@ -13,6 +15,7 @@ setup(
         (f"share/{package_name}/launch", ["launch/display.launch.py"]),
         (f"share/{package_name}/urdf", ["urdf/geekseek_fake_robot.urdf.xacro"]),
         (f"share/{package_name}/rviz", ["rviz/geekseek_fake_robot.rviz"]),
+        (f"share/{package_name}/meshes", glob("meshes/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
