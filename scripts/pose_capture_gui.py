@@ -103,7 +103,7 @@ def main() -> None:
                         message_color = RED
                     else:
                         captured = response.json()
-                        message = f"저장 완료: {captured['sample_id']} (3 images + JSON)"
+                        message = f"CSV 저장 완료: {captured['iphone_image']}"
                         message_color = GREEN
                         saved_flash_until = now + 0.35
                 except httpx.HTTPError as exc:
@@ -189,7 +189,7 @@ def main() -> None:
         bottom = pygame.Rect(20, height - 68, width - side_width - 50, 48)
         pygame.draw.rect(screen, (32, 42, 60), bottom, border_radius=10)
         controls = body_font.render(
-            "3:4 · GRID     SPACE  iPhone + Webcam skeleton + pose 저장     ESC  종료",
+            "SPACE  5DOF + iPhone + Webcam 저장     ESC  종료",
             True,
             TEXT,
         )

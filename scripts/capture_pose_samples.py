@@ -39,7 +39,6 @@ from geekseek.pose_capture import (  # noqa: E402
 from geekseek.perception import (  # noqa: E402
     MediaPipePersonSensor,
     WebcamFrameSource,
-    encode_jpeg,
     is_approaching,
     is_positioned,
 )
@@ -172,7 +171,6 @@ class RosFeedbackThread:
 
 @dataclass(frozen=True)
 class WebcamPoseFrame:
-    raw_jpeg: bytes
     skeleton_jpeg: bytes
     monotonic_seconds: float
     metadata: dict[str, object]
@@ -231,14 +229,13 @@ class WebcamPoseThread:
                 try:
                     frame = frame.copy()
                     signal = self._sensor.sense(frame)
-                    raw_jpeg = encode_jpeg(frame)
                     skeleton_jpeg = self._sensor.annotate_jpeg(
                         frame,
                         signal,
                         is_approaching(signal),
                         is_positioned(signal),
                     )
-                    if not raw_jpeg or not skeleton_jpeg:
+                    if not skeleton_jpeg:
                         raise RuntimeError("JPEG encode failed")
                     metadata: dict[str, object] = {
                         "camera_index": self.camera_index,
@@ -253,7 +250,6 @@ class WebcamPoseThread:
                         "inference_fps": round(self._sensor.inference_fps, 3),
                     }
                     bundle = WebcamPoseFrame(
-                        raw_jpeg=raw_jpeg,
                         skeleton_jpeg=skeleton_jpeg,
                         monotonic_seconds=time.monotonic(),
                         metadata=metadata,
@@ -337,7 +333,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     )
     capture_lock = asyncio.Lock()
     zero_offsets_rad, zero_reference = load_zero_offsets(args.zero_offset_file, args.axes)
-    args.save_dir.mkdir(parents=True, exist_ok=True)
+    args.csv_file.parent.mkdir(parents=True, exist_ok=True)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -354,7 +350,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             feedback.stop()
 
     app = FastAPI(title="GeekSeek pose capture", lifespan=lifespan)
-    app.mount("/samples", StaticFiles(directory=args.save_dir), name="samples")
+    app.mount("/samples", StaticFiles(directory=args.csv_file.parent), name="samples")
 
     @app.get("/phone", include_in_schema=False)
     async def phone_page() -> FileResponse:
@@ -436,33 +432,22 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                     max_speed_deg_s=args.max_speed,
                 )
                 image = await phone.capture(args.phone_timeout)
-                received = validate_snapshot(
+                validate_snapshot(
                     store.latest(),
                     max_age_seconds=args.max_feedback_age,
                     max_speed_deg_s=args.max_speed,
                 )
                 webcam_frame = webcam.latest(args.max_webcam_frame_age)
                 metadata = save_pose_sample(
-                    args.save_dir,
+                    args.csv_file,
                     image,
+                    webcam_frame.skeleton_jpeg,
                     trigger,
-                    received,
                     zero_offsets_rad,
-                    zero_reference,
-                    webcam_image=webcam_frame.raw_jpeg,
-                    webcam_skeleton_image=webcam_frame.skeleton_jpeg,
-                    webcam_metadata={
-                        **webcam_frame.metadata,
-                        "frame_age_seconds": round(
-                            time.monotonic() - webcam_frame.monotonic_seconds, 3
-                        ),
-                    },
                 )
             except PoseCaptureError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        metadata["image_url"] = f"/samples/{metadata['image']}"
-        metadata["metadata"] = f"{metadata['sample_id']}.json"
         return metadata
 
     @app.post("/api/capture-latest")
@@ -476,33 +461,22 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                     max_speed_deg_s=args.max_speed,
                 )
                 image = phone.latest(args.max_phone_frame_age)
-                received = validate_snapshot(
+                validate_snapshot(
                     store.latest(),
                     max_age_seconds=args.max_feedback_age,
                     max_speed_deg_s=args.max_speed,
                 )
                 webcam_frame = webcam.latest(args.max_webcam_frame_age)
                 metadata = save_pose_sample(
-                    args.save_dir,
+                    args.csv_file,
                     image,
+                    webcam_frame.skeleton_jpeg,
                     trigger,
-                    received,
                     zero_offsets_rad,
-                    zero_reference,
-                    webcam_image=webcam_frame.raw_jpeg,
-                    webcam_skeleton_image=webcam_frame.skeleton_jpeg,
-                    webcam_metadata={
-                        **webcam_frame.metadata,
-                        "frame_age_seconds": round(
-                            time.monotonic() - webcam_frame.monotonic_seconds, 3
-                        ),
-                    },
                 )
             except PoseCaptureError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        metadata["image_url"] = f"/samples/{metadata['image']}"
-        metadata["metadata"] = f"{metadata['sample_id']}.json"
         return metadata
 
     return app
@@ -515,7 +489,11 @@ def main() -> None:
     parser.add_argument("--axes", type=parse_axes, default=parse_axes("0,1,2,6,8"))
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8444)
-    parser.add_argument("--save-dir", type=Path, default=ROOT / "calibration")
+    parser.add_argument(
+        "--csv-file",
+        type=Path,
+        default=ROOT / "calibration" / "pose_samples.csv",
+    )
     parser.add_argument(
         "--zero-offset-file",
         type=Path,
@@ -541,7 +519,7 @@ def main() -> None:
     print(f"operator: https://127.0.0.1:{args.port}/operator")
     print(f"phone:    https://<JETSON-IP>:{args.port}/phone")
     print(f"axes:     {args.axes}")
-    print(f"save:     {args.save_dir}")
+    print(f"csv:      {args.csv_file}")
     uvicorn.run(
         create_app(args),
         host=args.host,

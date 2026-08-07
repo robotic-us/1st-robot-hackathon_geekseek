@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import csv
 import math
 import threading
 import time
@@ -107,60 +107,54 @@ def snapshot_dict(
 
 
 def save_pose_sample(
-    save_dir: Path,
+    csv_file: Path,
     image: bytes,
-    trigger: FeedbackSnapshot,
-    received: FeedbackSnapshot,
+    webcam_image: bytes,
+    snapshot: FeedbackSnapshot,
     zero_offsets_rad: dict[int, float] | None = None,
-    zero_reference: str | None = None,
-    webcam_image: bytes | None = None,
-    webcam_skeleton_image: bytes | None = None,
-    webcam_metadata: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if not image:
         raise PoseCaptureError("휴대폰에서 빈 이미지가 도착했습니다")
+    if not webcam_image:
+        raise PoseCaptureError("웹캠 skeleton 이미지가 비어 있습니다")
+    if len(snapshot.axes) != 5:
+        raise PoseCaptureError(f"5축 pose가 필요합니다 (현재 {len(snapshot.axes)}축)")
 
     timestamp = datetime.now().astimezone()
     stem = timestamp.strftime("pose_%Y%m%d_%H%M%S_%f")
-    image_name = f"{stem}.jpg"
-    webcam_image_name = f"{stem}_webcam.jpg" if webcam_image is not None else None
-    webcam_skeleton_name = (
-        f"{stem}_skeleton.jpg" if webcam_skeleton_image is not None else None
-    )
-    metadata_name = f"{stem}.json"
+    iphone_name = f"{stem}_iphone.jpg"
+    webcam_name = f"{stem}_webcam.jpg"
+    axis_fields = [f"axis_{axis.index}_deg" for axis in snapshot.axes]
+    fieldnames = [*axis_fields, "webcam_image", "iphone_image"]
 
-    trigger_positions = {axis.index: axis.position_rad for axis in trigger.axes}
-    movement_deg = [
-        round(math.degrees(axis.position_rad - trigger_positions[axis.index]), 6)
-        for axis in received.axes
-        if axis.index in trigger_positions
-    ]
-
-    metadata: dict[str, object] = {
-        "sample_id": stem,
-        "saved_at": timestamp.isoformat(timespec="milliseconds"),
-        "image": image_name,
-        "webcam_image": webcam_image_name,
-        "webcam_skeleton_image": webcam_skeleton_name,
-        "webcam_inference": webcam_metadata,
-        "zero_reference": zero_reference,
-        "feedback_at_trigger": snapshot_dict(trigger, zero_offsets_rad),
-        "feedback_at_image_receive": snapshot_dict(received, zero_offsets_rad),
-        "movement_during_capture_deg": movement_deg,
+    if zero_offsets_rad is None:
+        positions_deg = [math.degrees(axis.position_rad) for axis in snapshot.axes]
+    else:
+        positions_deg = [
+            math.degrees(wrapped_delta(axis.position_rad, zero_offsets_rad[axis.index]))
+            for axis in snapshot.axes
+        ]
+    row: dict[str, object] = {
+        **dict(zip(axis_fields, (round(value, 6) for value in positions_deg))),
+        "webcam_image": webcam_name,
+        "iphone_image": iphone_name,
     }
 
-    save_dir.mkdir(parents=True, exist_ok=True)
-    (save_dir / image_name).write_bytes(image)
-    if webcam_image_name is not None:
-        if not webcam_image:
-            raise PoseCaptureError("웹캠 원본 이미지가 비어 있습니다")
-        (save_dir / webcam_image_name).write_bytes(webcam_image)
-    if webcam_skeleton_name is not None:
-        if not webcam_skeleton_image:
-            raise PoseCaptureError("웹캠 skeleton 이미지가 비어 있습니다")
-        (save_dir / webcam_skeleton_name).write_bytes(webcam_skeleton_image)
-    (save_dir / metadata_name).write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return metadata
+    csv_file.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not csv_file.exists() or csv_file.stat().st_size == 0
+    if not write_header:
+        with csv_file.open("r", encoding="utf-8", newline="") as handle:
+            existing_header = next(csv.reader(handle), [])
+        if existing_header != fieldnames:
+            raise PoseCaptureError(
+                f"CSV 축/열 구성이 현재 로봇과 다릅니다: {existing_header}"
+            )
+
+    (csv_file.parent / iphone_name).write_bytes(image)
+    (csv_file.parent / webcam_name).write_bytes(webcam_image)
+    with csv_file.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+    return row
