@@ -1,0 +1,21 @@
+runtime:
+  robot: phorce
+  capture: webapp
+  person_sensor: mediapipe
+  camera_index: 0
+
+  # Run `phorce list` on the Jetson and replace these example IDs with the
+  # three slots that contain your validated P-Vector motions.
+  phorce_motion_ids:
+    frame.full_body: 1
+    frame.upper_body: 2
+    frame.product_closeup: 3
+  phorce_timeout_seconds: 30.0
+  phorce_busy_retries: 2
+  phorce_busy_retry_seconds: 1.0
+
+web:
+  host: 0.0.0.0
+  port: 8443
+  ssl_keyfile: certs/key.pem
+  ssl_certfile: certs/cert.pem

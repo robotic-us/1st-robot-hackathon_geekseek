@@ -1,0 +1,6 @@
+{
+  "source_sample": "pose_20260808_045958_698478",
+  "description": "Servo-engaged Studio zero pose captured at 2026-08-08 04:59:58 KST",
+  "axis_indices": [0, 1, 2, 6, 8],
+  "position_rad": [2.5615, 0.496, -0.72, -0.834, 0.686]
+}
