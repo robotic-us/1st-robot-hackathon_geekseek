@@ -35,11 +35,37 @@ UI 없이 상태 머신 한 사이클만 헤드리스로 돌리려면 `--demo`�
 python3 -m geekseek --config config/dev.yaml --demo
 ```
 
-접속 주소 (서버 실행 후):
+접속 주소 (서버 실행 후, `config/dev.yaml`처럼 `web.port: 8000`이고 `ssl_*` 설정이 없는 경우):
 
 - 개발 화면: `http://localhost:8000/debug`
 - iPad 1: `http://<서버-IP>:8000/face`
 - iPad 2: `http://<서버-IP>:8000/guide`
+
+`local-demo*.yaml`/`jetson-phorce.yaml`처럼 `web.port: 8443` + `ssl_keyfile`/`ssl_certfile`를 쓰는
+설정은 `https://<서버-IP>:8443/face`·`/guide`·`/debug`로 접속한다. `<서버-IP>`는 서버를 실행한 기기에서
+`hostname -I`로 확인하고, iPad가 그 기기와 같은 Wi-Fi 대역에 있어야 한다. 인증서가 없으면 (`certs/`
+디렉터리가 비어 있으면) 이 설정들은 서버 시작 자체가 실패하므로 먼저 만들어둔다.
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem \
+  -days 3650 -nodes -subj "/CN=geekseek"
+```
+
+자체서명 인증서라 iPad Safari에서는 "안전하지 않음" 경고가 뜬다 — "고급 → 계속 진행"으로 넘어가면 된다.
+
+`runtime.debug_window: true`(`local-demo*.yaml`)를 쓰면 pygame 미션컨트롤 창(`scripts/mission_control.py`)이
+서버와 같은 파이썬 인터프리터로 자동 실행된다. 창이 안 뜨면 그 인터프리터에 `pygame`이 없거나(설치),
+`mediapipe` import가 깨져 있는 경우가 많다 — 특히 Jetson 등 시스템 패키지로 깔린 `matplotlib`이 pip로
+설치한 `numpy>=2`와 ABI 충돌을 내며 `mediapipe.tasks.python.vision`을 못 불러오는 경우가 있는데,
+사용자 site-packages에 최신 `matplotlib`을 설치하면(시스템 패키지보다 우선순위가 높아서) 해결된다.
+
+```bash
+python3 -m pip install --user --upgrade pygame matplotlib
+```
+
+원격(예: SSH)으로 서버를 띄우면서 pygame 창을 물리 디스플레이에 띄우려면 그 세션의 `DISPLAY`/`XAUTHORITY`를
+로그인된 세션 값으로 맞춰줘야 한다 (예: `DISPLAY=:1 XAUTHORITY=/run/user/<uid>/gdm/Xauthority`).
 
 ## 테스트
 
