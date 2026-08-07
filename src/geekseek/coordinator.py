@@ -79,6 +79,8 @@ class Coordinator:
             self._frame_task.cancel()
             await asyncio.gather(self._frame_task, return_exceptions=True)
             self._frame_task = None
+        if hasattr(self.robot, "close"):
+            self.robot.close()
         for task in self._effects:
             task.cancel()
         if self._effects:
