@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# A stray `pip install --user mediapipe` (CPU wheel) elsewhere on the machine
+# lands in ~/.local/lib/pythonX.Y/site-packages, which Python puts ahead of
+# this env's own site-packages — silently shadowing the GPU wheel installed
+# here with the CPU one. Disable user-site lookups for this env so `import
+# mediapipe` always resolves to the wheel actually installed in $CONDA_PREFIX.
+_GEEKSEEK_PREV_PYTHONNOUSERSITE="${PYTHONNOUSERSITE-}"
+export PYTHONNOUSERSITE=1
+
 # JetPack exposes NVIDIA EGL/GLES through vendor libraries. Going through the
 # generic GLVND stubs can yield a valid EGL context whose GL calls are null on
 # Jetson, so prefer the vendor libraries without modifying system symlinks.

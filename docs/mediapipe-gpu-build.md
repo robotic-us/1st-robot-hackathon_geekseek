@@ -73,3 +73,28 @@ conda run -n geekseek python tools/check_mediapipe_gpu.py
 
 The checker is intentionally strict: it does not silently fall back to CPU.
 It creates a two-person PoseLandmarker and runs one blank frame through it.
+
+### Everything else must be installed *inside* this env, not `--user`
+
+`pip install --no-deps` above only covers the GPU wheel itself. The rest of
+the runtime — the editable `geekseek` package, `fastapi`, `uvicorn[standard]`,
+`httpx`, `pygame` (for `runtime.debug_window`) — still needs to land in
+`$ENV_PREFIX/lib/python3.10/site-packages`:
+
+```bash
+conda run -n geekseek python -m pip install --no-deps -e .
+conda run -n geekseek python -m pip install \
+  'fastapi>=0.115' 'uvicorn[standard]>=0.34' 'httpx>=0.28' pygame
+```
+
+Do **not** `pip install --user` any of these on the same machine. A user-site
+package (`~/.local/lib/python3.10/site-packages`) shadows an env-installed one
+of the same name, since user-site is searched first by default — so a stray
+`pip install --user mediapipe` (the plain CPU PyPI wheel) will silently make
+`import mediapipe` resolve to the CPU build even inside this env, and the
+checker above will fail. `tools/conda/activate.d/geekseek-jetson-gpu.sh` sets
+`PYTHONNOUSERSITE=1` while this env is active specifically to prevent that —
+but that also means anything only installed with `--user` (not into this
+env's own site-packages) becomes invisible while the env is active, which is
+why every runtime dependency must be installed into the env directly, as
+above.

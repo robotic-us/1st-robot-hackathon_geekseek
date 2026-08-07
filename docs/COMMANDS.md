@@ -67,6 +67,21 @@ python3 -m pip install --user --upgrade pygame matplotlib
 원격(예: SSH)으로 서버를 띄우면서 pygame 창을 물리 디스플레이에 띄우려면 그 세션의 `DISPLAY`/`XAUTHORITY`를
 로그인된 세션 값으로 맞춰줘야 한다 (예: `DISPLAY=:1 XAUTHORITY=/run/user/<uid>/gdm/Xauthority`).
 
+### Jetson(phorce)에서 GPU 포즈 인식으로 실행
+
+`tools/build_mediapipe_gpu.sh`로 GPU wheel을 미리 빌드해둔 Jetson에서는, 시스템 `python3`가 아니라
+그 wheel과 나머지 런타임 의존성이 설치된 `geekseek` conda 환경으로 실행해야 `person_sensor: mediapipe`가
+CPU가 아니라 GPU 델리게이트를 쓴다 (자세한 설치 절차는 [`mediapipe-gpu-build.md`](mediapipe-gpu-build.md) 참고).
+
+```bash
+source ~/miniforge3/etc/profile.d/conda.sh
+conda run --no-capture-output -n geekseek python -m geekseek --config config/local-demo-no-robot.yaml
+```
+
+로그에 `MediaPipe pose performance: delegate=gpu, ...`가 찍히면 GPU로 도는 것이고, `delegate=cpu`면
+시스템 `python3`로 실행 중이거나(위 명령을 안 씀), `geekseek` 환경에 GPU wheel이 아니라 일반
+PyPI `mediapipe`가 설치돼 있는 경우다.
+
 ## 테스트
 
 ```bash
