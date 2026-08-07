@@ -222,13 +222,14 @@ class MediaPipePersonSensor:
         return buffer.tobytes() if ok else b""
 
     def mirror_jpeg(self, frame: object) -> bytes:
-        """Selfie-mirrored, overlay-free JPEG for the guest-facing live camera
-        preview (iPad2) — cheap (flip + encode only), safe to compute every
-        sense-loop tick alongside the debug overlay."""
+        """True-orientation, overlay-free JPEG for the guest-facing live
+        camera preview (iPad2) — cheap (encode only), safe to compute every
+        sense-loop tick alongside the debug overlay. Not actually mirrored
+        despite the name (kept for the call sites) — a real mirror flip
+        reverses any on-screen text/numbers in the shot, which read backward."""
         import cv2
 
-        mirrored = cv2.flip(frame, 1)
-        ok, buffer = cv2.imencode(".jpg", mirrored)
+        ok, buffer = cv2.imencode(".jpg", frame)
         return buffer.tobytes() if ok else b""
 
     def close(self) -> None:
