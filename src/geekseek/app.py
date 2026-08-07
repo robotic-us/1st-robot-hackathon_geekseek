@@ -26,9 +26,15 @@ def build_coordinator(config: AppConfig) -> Coordinator:
 
     person_sensor = None
     frame_source = None
+    live_frame_interval = 1 / config.runtime.camera_fps
     if config.runtime.person_sensor == "mediapipe":
         person_sensor = MediaPipePersonSensor()
-        frame_source = WebcamFrameSource(config.runtime.camera_index, config.runtime.camera_fps)
+        frame_source = WebcamFrameSource(
+            config.runtime.camera_index,
+            config.runtime.camera_fps,
+            config.runtime.camera_width,
+            config.runtime.camera_height,
+        )
     elif config.runtime.person_sensor == "fake":
         person_sensor = FakePersonSensor()
 
@@ -41,6 +47,7 @@ def build_coordinator(config: AppConfig) -> Coordinator:
         frame_source=frame_source,
         greeter=greeter,
         sense_interval=config.runtime.sense_interval,
+        live_frame_interval=live_frame_interval,
         greeting_seconds=config.runtime.greeting_seconds,
         preview_seconds=config.runtime.preview_seconds,
         farewell_seconds=config.runtime.farewell_seconds,

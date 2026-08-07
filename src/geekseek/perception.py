@@ -243,12 +243,27 @@ class WebcamFrameSource:
     than the sense loop (5Hz by default) or the MJPEG streams (~6.7Hz) can
     consume just wastes a full CPU core on frames nobody looks at."""
 
-    def __init__(self, camera_index: int = 0, target_fps: float = 15.0) -> None:
+    def __init__(
+        self,
+        camera_index: int = 0,
+        target_fps: float = 15.0,
+        frame_width: int = 640,
+        frame_height: int = 480,
+    ) -> None:
         import cv2
 
         self._capture = cv2.VideoCapture(camera_index)
         if not self._capture.isOpened():
             raise RuntimeError(f"could not open camera index {camera_index}")
+        # Left at the driver default, some webcams negotiate a high-res mode
+        # that only delivers ~7fps — a ~140ms-wide exposure/readout window per
+        # frame, which shows up as heavy motion blur on anything moving.
+        # Requesting a smaller frame unlocks the camera's faster (and thus
+        # shorter-exposure) mode; measured 7fps -> 30fps on the kiosk's webcam
+        # going from its 1280x960 default down to 640x480. Detection accuracy
+        # is unaffected since PersonSignal coordinates are already normalized.
+        self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
+        self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
         self._latest: object | None = None
         self._running = True
         self._frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0

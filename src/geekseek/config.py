@@ -16,6 +16,8 @@ class RuntimeConfig:
     person_sensor: str = "fake"
     camera_index: int = 0
     camera_fps: float = 15.0
+    camera_width: int = 640
+    camera_height: int = 480
     sense_interval: float = 0.2
     greeting_seconds: float = 3.0
     preview_seconds: float = 3.0

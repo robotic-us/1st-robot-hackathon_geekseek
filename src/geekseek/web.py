@@ -85,7 +85,7 @@ def create_app(coordinator: Coordinator) -> FastAPI:
                 frame = get_frame()
                 if frame:
                     yield boundary + b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-                await asyncio.sleep(0.15)
+                await asyncio.sleep(0.05)
 
         return StreamingResponse(
             stream(),

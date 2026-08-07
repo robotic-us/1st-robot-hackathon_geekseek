@@ -24,6 +24,7 @@ class Coordinator:
         frame_source: FrameSource | None = None,
         greeter: Greeter | None = None,
         sense_interval: float = 0.2,
+        live_frame_interval: float = 1 / 15,
         greeting_seconds: float = 3.0,
         preview_seconds: float = 3.0,
         farewell_seconds: float = 4.0,
@@ -37,6 +38,7 @@ class Coordinator:
         self.frame_source = frame_source
         self.greeter = greeter
         self.sense_interval = sense_interval
+        self.live_frame_interval = live_frame_interval
         self.greeting_seconds = greeting_seconds
         self.preview_seconds = preview_seconds
         self.farewell_seconds = farewell_seconds
@@ -44,9 +46,13 @@ class Coordinator:
         self.ready_timeout_seconds = ready_timeout_seconds
         self.debug_frame: bytes | None = None
         self.live_frame: bytes | None = None
+        self._last_signal = PersonSignal(detected=False)
+        self._last_approaching = False
+        self._last_positioned = False
         self.events: asyncio.Queue[Event | None] = asyncio.Queue()
         self._runner: asyncio.Task[None] | None = None
         self._sense_task: asyncio.Task[None] | None = None
+        self._frame_task: asyncio.Task[None] | None = None
         self._effects: set[asyncio.Task[None]] = set()
         self._subscribers: set[asyncio.Queue[dict[str, object]]] = set()
         self._ready_event = asyncio.Event()
@@ -57,6 +63,8 @@ class Coordinator:
         self._runner = asyncio.create_task(self._run())
         if self.person_sensor is not None:
             self._sense_task = asyncio.create_task(self._sense_loop())
+            if self.frame_source is not None:
+                self._frame_task = asyncio.create_task(self._frame_loop())
         await self.emit(EventType.SYSTEM_READY)
         await self.wait_for_state(State.WAITING)
 
@@ -67,6 +75,10 @@ class Coordinator:
             self._sense_task.cancel()
             await asyncio.gather(self._sense_task, return_exceptions=True)
             self._sense_task = None
+        if self._frame_task is not None:
+            self._frame_task.cancel()
+            await asyncio.gather(self._frame_task, return_exceptions=True)
+            self._frame_task = None
         for task in self._effects:
             task.cancel()
         if self._effects:
@@ -153,10 +165,9 @@ class Coordinator:
             signal: PersonSignal = self.person_sensor.sense(frame)
             approaching = is_approaching(signal)
             positioned = is_positioned(signal)
-            if hasattr(self.person_sensor, "annotate_jpeg"):
-                self.debug_frame = self.person_sensor.annotate_jpeg(frame, signal, approaching, positioned)
-            if hasattr(self.person_sensor, "mirror_jpeg"):
-                self.live_frame = self.person_sensor.mirror_jpeg(frame)
+            self._last_signal = signal
+            self._last_approaching = approaching
+            self._last_positioned = positioned
             if self.context.state is State.WAITING and approaching:
                 await self.emit(EventType.PERSON_APPROACHED)
             elif self.context.state is State.GUIDING and positioned:
@@ -167,6 +178,27 @@ class Coordinator:
                 and is_ready_signal(signal)
             ):
                 self._ready_event.set()
+
+    async def _frame_loop(self) -> None:
+        """Refreshes the guest-facing live/debug camera preview at the
+        camera's own capture rate, independent of sense_interval. Pose
+        *detection* only needs a few samples a second to drive state
+        transitions, but a guest watching themselves in the live mirror
+        preview perceives anything slower than ~10fps as stutter/ghosting —
+        redrawing the skeleton overlay onto each new frame is cheap (reuses
+        the landmarks from the last sense() call) so this can run much
+        faster than the sense loop."""
+        while True:
+            await asyncio.sleep(self.live_frame_interval)
+            frame = self.frame_source()
+            if frame is None:
+                continue
+            if hasattr(self.person_sensor, "annotate_jpeg"):
+                self.debug_frame = self.person_sensor.annotate_jpeg(
+                    frame, self._last_signal, self._last_approaching, self._last_positioned
+                )
+            if hasattr(self.person_sensor, "mirror_jpeg"):
+                self.live_frame = self.person_sensor.mirror_jpeg(frame)
 
     async def _generate_greeting(self) -> None:
         """Fire-and-forget VLM caption for the greeting caption. Never blocks
