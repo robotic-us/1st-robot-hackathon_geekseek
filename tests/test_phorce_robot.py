@@ -34,16 +34,37 @@ class FakeMotionRejected(FakePhorceError):
 
 @dataclass
 class FakeStatus:
+    """실제 Status의 판정 필드를 그대로 흉내낸다. state_name은 파생값이지
+    독립 필드가 아니다 — 그걸 필드로 두면 '완료 후 COMPLETED에 머문다'는
+    실제 동작을 테스트가 재현하지 못한다."""
+
     contract_active: bool = True
     age_ms: int = 5
     boot_id: int = 7
-    state_name: str = "IDLE"
-    active_motion_id: int = 0
+    primary_state: str = "IDLE"   # IDLE | EXECUTING | COMPLETED | FAILED | UNKNOWN
+    active: bool = False
+    queue_count: int = 0
+    physical_idle: bool = True
     recovery_required: bool = False
+    active_motion_id: int = 0
 
     @property
     def is_fresh(self) -> bool:
         return self.age_ms < 500
+
+    @property
+    def state_name(self) -> str:
+        if not self.contract_active:
+            return "CONTRACT_INACTIVE"
+        if not self.is_fresh:
+            return "STALE"
+        if self.boot_id == 0:
+            return "UNKNOWN"
+        if self.primary_state == "IDLE":
+            if not self.active and self.queue_count == 0 and self.physical_idle:
+                return "IDLE"
+            return "RECOVERY_REQUIRED" if self.recovery_required else "UNKNOWN"
+        return self.primary_state
 
 
 @dataclass
@@ -252,10 +273,10 @@ class PhorceRobotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_launch_waits_for_a_fresh_idle_reading(self):
         self.client.statuses = [
-            FakeStatus(state_name="RUNNING", active_motion_id=4),
+            FakeStatus(primary_state="EXECUTING", active=True, physical_idle=False, active_motion_id=4),
             FakeStatus(age_ms=9_999),  # stale — idle로 인정하면 안 된다
             FakeStatus(contract_active=False),
-            FakeStatus(state_name="IDLE"),
+            FakeStatus(),
         ]
         robot = self.make_robot()
         await robot.move_to("frame.full_body")
@@ -270,9 +291,27 @@ class PhorceRobotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("IDLE", str(caught.exception))
         self.assertEqual(self.client.played, [])
 
+    async def test_a_completed_motion_still_counts_as_ready(self):
+        """모션이 끝나면 게이트웨이는 IDLE이 아니라 COMPLETED에 머문다 —
+        PlayResult.ok가 요구하는 상태가 바로 그것이다. 문자열 'IDLE'만
+        통과시키면 첫 발사 뒤 모든 발사가 막힌다."""
+        self.client.statuses = [FakeStatus(primary_state="COMPLETED", active_motion_id=5)] * 4
+        robot = self.make_robot()
+        await robot.move_to("frame.full_body")
+        self.assertEqual(self.client.played, [4])
+
+    async def test_not_ready_while_the_arm_is_still_settling(self):
+        """physical_idle이 False면 아직 정착 중이다 — 큐가 없으니 지금 보내면 버려진다."""
+        self.client.statuses = [FakeStatus(primary_state="COMPLETED", physical_idle=False)] * 50
+        robot = self.make_robot()
+        with self.assertRaises(RuntimeError) as caught:
+            await robot.move_to("frame.full_body")
+        self.assertIn("physical_idle=False", str(caught.exception))
+        self.assertEqual(self.client.played, [])
+
     async def test_recovery_required_is_not_retried(self):
         """12/13은 기다려도 풀리지 않는다 — 사람이 버튼을 눌러야 한다."""
-        self.client.statuses = [FakeStatus(state_name="RECOVERY_REQUIRED", recovery_required=True)]
+        self.client.statuses = [FakeStatus(primary_state="COMPLETED", recovery_required=True)]
         robot = self.make_robot()
         with self.assertRaises(RuntimeError) as caught:
             await robot.move_to("frame.full_body")

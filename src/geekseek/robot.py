@@ -357,12 +357,18 @@ class PhorceRobot:
             )
 
     async def _wait_until_idle(self) -> None:
-        """Gate every launch on a fresh IDLE reading.
+        """Gate every launch on a fresh reading that says the arm is resting.
 
         There is no queue: a goal sent while the previous motion is still
         settling is dropped, not deferred. And a stale or contract-inactive
         sample cannot stand in for idle — Status says so explicitly, so the
-        freshness fields are checked before the idle ones.
+        freshness fields are checked before the resting ones.
+
+        "Resting" is the flags, not `state_name`. A finished motion leaves the
+        gateway in COMPLETED, not IDLE, and it stays there until the next
+        request — `PlayResult.ok` requires exactly that state, so COMPLETED is
+        what success looks like. Waiting for the literal string "IDLE" lets the
+        first launch through and then blocks every one after it.
         """
         await self.preflight()
 
@@ -386,15 +392,19 @@ class PhorceRobot:
                     last = f"STALE — 상태가 {status.age_ms}ms 지났습니다"
                 elif status.boot_id == 0:
                     last = "UNKNOWN — boot_id가 아직 0입니다"
-                elif status.state_name == "IDLE":
-                    return
                 elif status.recovery_required:
                     raise RuntimeError(
                         "로봇이 RECOVERY_REQUIRED 상태입니다 — 2번 버튼으로 파킹한 뒤 "
                         "영점을 다시 잡아야 합니다 (기다려도 풀리지 않습니다)"
                     )
+                elif status.physical_idle and not status.active and status.queue_count == 0:
+                    return
                 else:
-                    last = f"{status.state_name} (active_motion_id={status.active_motion_id})"
+                    last = (
+                        f"{status.state_name} (physical_idle={status.physical_idle}, "
+                        f"active={status.active}, queue={status.queue_count}, "
+                        f"active_motion_id={status.active_motion_id})"
+                    )
             await asyncio.sleep(self.idle_poll_seconds)
         raise RuntimeError(
             f"{self.idle_timeout_seconds:.1f}초 안에 로봇이 IDLE이 되지 않았습니다: {last}"
