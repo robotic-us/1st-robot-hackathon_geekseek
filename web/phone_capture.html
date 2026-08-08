@@ -6,12 +6,15 @@
 <title>phone capture test</title>
 <style>
   body { margin: 0; background: #111; color: #eee; font-family: -apple-system, sans-serif; }
-  video { width: 100%; display: block; }
+  /* 저장되는 것과 같은 3:4만 보여준다. 스트림이 16:9면 캡처는 위아래를 잘라내는데
+     미리보기가 잘리기 전 전체를 보여주면, 화면에 보이던 구도와 사진이 달라진다. */
+  .frame { width: 100%; aspect-ratio: 3 / 4; overflow: hidden; background: #000; }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
   #status { padding: 12px; font-size: 14px; }
 </style>
 </head>
 <body>
-<video id="v" autoplay playsinline muted></video>
+<div class="frame"><video id="v" autoplay playsinline muted></video></div>
 <div id="status">connecting...</div>
 <canvas id="c" style="display:none"></canvas>
 <script>
@@ -31,7 +34,11 @@
   async function start() {
     const stream = await navigator.mediaDevices.getUserMedia({
       // 비율은 아래에서 강제하므로 여기서는 "가능하면 크게"만 요청한다.
-      video: { facingMode: "environment", height: { ideal: MAX_HEIGHT } },
+      video: {
+        facingMode: "environment",
+        aspectRatio: { ideal: RATIO },   // 3:4 모드가 있으면 그대로 받아 크롭이 없다
+        height: { ideal: MAX_HEIGHT },
+      },
       audio: false,
     });
     video.srcObject = stream;

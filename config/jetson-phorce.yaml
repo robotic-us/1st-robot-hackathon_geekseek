@@ -1,8 +1,14 @@
+# local-demo-no-robot.yaml과 같은 구성에서 로봇만 실물(phorce)로 바꾼 것.
+# 웹캠 인식·iPad UI·촬영용 폰·갤러리는 전부 동일하게 동작하고, 5단계(capturing)에서
+# 팔이 실제로 28초 움직인다.
+#
+# move_seconds / capture_seconds는 fake·rviz 로봇 전용이라 여기서는 뺐다.
 runtime:
   robot: phorce
   capture: webapp
   person_sensor: mediapipe
   camera_index: 0
+  debug_window: true
 
   # 구도 → SD카드 슬롯. 슬롯 파일은 scripts/build_motion_slots.py가 만들고,
   # 같은 이름의 .schedule.json이 셔터 타이밍을 담는다. `phorce list`로 실제
@@ -24,13 +30,11 @@ runtime:
 
   # 미리보기는 가이드 화면이 사진 하나당 0.36초씩 넘긴다. 40장이면 고정 3초로는
   # 8장밖에 못 보고 "마음에 드시나요?"로 넘어가므로, 장수에 맞춰 늘린다.
+  # (fake 로봇은 3장이라 이 값이 필요 없어서 no-robot 설정에는 없다.)
   slide_seconds: 0.36
 
-  # 손님용 사진 페이지. Tailscale Funnel이 이 로컬 포트를 진짜 인증서가 붙은
-  # 공개 주소로 내보낸다 — 손님은 Wi-Fi를 바꿀 필요 없이 셀룰러로 열 수 있고,
-  # 신뢰된 origin이라야 navigator.share로 40장을 한 번에 저장할 수 있다.
-  #   sudo tailscale funnel --bg 8080
-  #   tailscale funnel status   ← 여기 뜨는 https 주소를 아래에 적는다
+  # 손님용 사진 페이지 (QR). Tailscale Funnel이 아래 로컬 포트를 진짜 인증서가
+  # 붙은 공개 주소로 내보낸다:  sudo tailscale funnel --bg 8080
   # 비워두면 갤러리도 QR도 뜨지 않는다.
   gallery_base_url: "https://phorce.taile3ec58.ts.net"
   gallery_port: 8080
