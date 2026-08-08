@@ -9,6 +9,35 @@ cd ~/Desktop/hackton/1st-robot-hackathon_geekseek
 source /opt/ros/humble/setup.bash
 ```
 
+## 빠른 실행 (붙여넣기용)
+
+로봇 전원 → 초록등 → **기능버튼 1을 1초** → 10초 대기. 그 다음:
+
+```bash
+# 터미널 1
+cat /sys/class/net/eno1/operstate
+ros2 run agx_phorce_bridge phorce_monitor \
+  --ros-args -p nic:=eno1 -p mode:=command -p axes:=2 -p mbx_enabled:=true
+
+# 터미널 2
+ros2 run agx_motion_slot motion_action_server --ros-args -p backend:=ecat
+
+# 터미널 3
+phorce doctor      # READY
+phorce status      # physical idle: True
+phorce list        # 슬롯 1~5
+phorce play 4      # (선택) 팔이 28초 움직인다
+
+# 터미널 4 — 한 번만
+sudo tailscale funnel --bg 8080
+
+# 터미널 5
+python3 -m geekseek --config config/jetson-phorce.yaml
+```
+
+터미널 1~3은 기존 로봇 단독 점검 루틴 그대로이고, 4·5가 키오스크용으로 얹힌 것이다.
+아래는 각 단계에서 확인할 것.
+
 ---
 
 ## 0. 슬롯 (웨이포인트를 새로 찍었을 때만)
