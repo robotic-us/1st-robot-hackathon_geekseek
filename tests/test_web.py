@@ -85,6 +85,38 @@ class WebTests(unittest.TestCase):
                 return value
         self.fail(f"state did not become {state}")
 
+    def test_guide_offers_a_button_per_framing(self) -> None:
+        """구도 선택 단계의 두 버튼이 각자 다른 슬롯으로 이어져야 한다."""
+        html = self.client.get("/guide").text
+        self.assertIn('data-template="full_body"', html)
+        self.assertIn('data-template="upper_body"', html)
+        self.assertIn("전신샷", html)
+        self.assertIn("상반신샷", html)
+        # 옛 단일 버튼이 남아 있으면 JS가 둘 중 하나만 연결한다.
+        self.assertNotIn('id="start-capture"', html)
+
+    def _start_capture(self, template: str) -> None:
+        response = self.client.post("/api/capture-started", json={"template_id": template})
+        self.assertEqual(response.status_code, 200)
+        state = self.client.get("/api/state").json()
+        self.assertEqual(state["template_id"], template)
+        self.assertEqual(state["state"], "guiding")
+
+    def test_full_body_button_starts_a_full_body_capture(self) -> None:
+        self._start_capture("full_body")
+
+    def test_upper_body_button_starts_an_upper_body_capture(self) -> None:
+        self._start_capture("upper_body")
+
+    def test_state_carries_the_expected_photo_count(self) -> None:
+        """가이드 화면의 'n / N' 진행률이 쓰는 값."""
+        self.assertIn("photo_target", self.client.get("/api/state").json())
+
+    def test_state_carries_live_framing_fields(self) -> None:
+        state = self.client.get("/api/state").json()
+        self.assertIn("framing_message", state)
+        self.assertIn("framing_direction", state)
+        self.assertIn("framing_positioned", state)
 
 if __name__ == "__main__":
     unittest.main()

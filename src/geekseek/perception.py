@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass
@@ -182,6 +183,16 @@ class MediaPipePersonSensor:
             hand_raised=_any_hand_raised(result.pose_landmarks, self._min_landmark_visibility),
         )
 
+    @property
+    def latest_landmarks(self) -> tuple:
+        """Pose landmarks from the latest ``sense`` call.
+
+        The tuple is read-only at the container level and lets guest-facing
+        guide tools use the full skeleton without depending on a private
+        implementation attribute.
+        """
+        return tuple(self._last_landmarks_list)
+
     def annotate_jpeg(self, frame: object, signal: PersonSignal, approaching: bool, positioned: bool) -> bytes:
         """Draws every detected person's skeleton (from the most recent
         sense() call) plus a status readout onto a copy of frame, for a live
@@ -222,15 +233,14 @@ class MediaPipePersonSensor:
         return buffer.tobytes() if ok else b""
 
     def mirror_jpeg(self, frame: object) -> bytes:
-        """True-orientation, overlay-free JPEG for the guest-facing live
-        camera preview (iPad2) — cheap (encode only), safe to compute every
-        sense-loop tick alongside the debug overlay. Not actually mirrored
-        despite the name (kept for the call sites) — a real mirror flip
-        reverses any on-screen text/numbers in the shot, which read backward."""
-        import cv2
+        """Center-cropped 3:4 JPEG for the guest-facing iPad preview.
 
-        ok, buffer = cv2.imencode(".jpg", frame)
-        return buffer.tobytes() if ok else b""
+        The 1280x960 inference/storage frame stays untouched.  The iPad gets
+        its native-density center 720x960 crop, with no stretching or resize.
+        Not actually mirrored despite the historical method name: mirroring
+        makes text and numbers in the scene read backwards.
+        """
+        return encode_jpeg(center_crop_to_aspect(frame, 3, 4))
 
     def close(self) -> None:
         self._landmarker.close()
@@ -248,23 +258,21 @@ class WebcamFrameSource:
         self,
         camera_index: int = 0,
         target_fps: float = 15.0,
-        frame_width: int = 640,
-        frame_height: int = 480,
+        frame_width: int = 1280,
+        frame_height: int = 960,
     ) -> None:
         import cv2
 
         self._capture = cv2.VideoCapture(camera_index)
         if not self._capture.isOpened():
             raise RuntimeError(f"could not open camera index {camera_index}")
-        # Left at the driver default, some webcams negotiate a high-res mode
-        # that only delivers ~7fps — a ~140ms-wide exposure/readout window per
-        # frame, which shows up as heavy motion blur on anything moving.
-        # Requesting a smaller frame unlocks the camera's faster (and thus
-        # shorter-exposure) mode; measured 7fps -> 30fps on the kiosk's webcam
-        # going from its 1280x960 default down to 640x480. Detection accuracy
-        # is unaffected since PersonSignal coordinates are already normalized.
+        # C270 only delivers high resolution at useful frame rates through its
+        # compressed MJPEG mode. FOURCC must be selected before dimensions;
+        # otherwise 1280x960 negotiates YUY2 at only 5-7.5 fps.
+        self._capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
         self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
+        self._capture.set(cv2.CAP_PROP_FPS, target_fps)
         self._latest: object | None = None
         self._running = True
         self._frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0
@@ -299,6 +307,28 @@ def encode_jpeg(frame: object) -> bytes:
 
     ok, buffer = cv2.imencode(".jpg", frame)
     return buffer.tobytes() if ok else b""
+
+
+def center_crop_to_aspect(frame: object, aspect_width: int, aspect_height: int) -> object:
+    """Return a centered view at the requested aspect without resizing.
+
+    For example, a 1280x960 4:3 frame cropped to 3:4 becomes 720x960.  The
+    returned slice keeps the source resolution and never distorts geometry.
+    """
+    if aspect_width <= 0 or aspect_height <= 0:
+        raise ValueError("aspect dimensions must be positive")
+    height, width = frame.shape[:2]
+    target_ratio = aspect_width / aspect_height
+    source_ratio = width / height
+    if math.isclose(source_ratio, target_ratio, rel_tol=0.0, abs_tol=1e-9):
+        return frame
+    if source_ratio > target_ratio:
+        cropped_width = max(1, round(height * target_ratio))
+        left = (width - cropped_width) // 2
+        return frame[:, left : left + cropped_width]
+    cropped_height = max(1, round(width / target_ratio))
+    top = (height - cropped_height) // 2
+    return frame[top : top + cropped_height, :]
 
 
 def is_approaching(signal: PersonSignal, size_threshold: float = 0.12) -> bool:

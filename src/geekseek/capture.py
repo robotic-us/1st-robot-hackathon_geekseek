@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -11,6 +12,9 @@ import httpx
 @dataclass(frozen=True)
 class CaptureResult:
     photo_url: str
+    # 갤러리는 URL이 아니라 파일에서 바로 읽는다. fake 캡처처럼 실제 파일이
+    # 없는 구현은 None을 둔다.
+    path: Path | None = None
 
 
 class CaptureDevice(Protocol):
@@ -70,9 +74,13 @@ class WebAppCapture:
 
         self.count += 1
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        path = self.save_dir / f"phone_{self.count}.jpg"
+        # A per-process counter alone restarts at 1 every launch and quietly
+        # overwrites the previous session's photos — and a sweep now saves
+        # dozens per guest, so a restart used to cost a whole shoot.
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        path = self.save_dir / f"phone_{stamp}.jpg"
         path.write_bytes(data)
-        return CaptureResult(photo_url=f"/photos/{path.name}")
+        return CaptureResult(photo_url=f"/photos/{path.name}", path=path)
 
 
 class HttpSnapshotCapture:
@@ -94,4 +102,4 @@ class HttpSnapshotCapture:
         self.save_dir.mkdir(parents=True, exist_ok=True)
         path = self.save_dir / f"capture_{self.count}.jpg"
         path.write_bytes(response.content)
-        return CaptureResult(photo_url=f"/photos/{path.name}")
+        return CaptureResult(photo_url=f"/photos/{path.name}", path=path)

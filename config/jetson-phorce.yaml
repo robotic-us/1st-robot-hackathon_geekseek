@@ -32,7 +32,7 @@ runtime:
   #   sudo tailscale funnel --bg 8080
   #   tailscale funnel status   ← 여기 뜨는 https 주소를 아래에 적는다
   # 비워두면 갤러리도 QR도 뜨지 않는다.
-  gallery_base_url: ""
+  gallery_base_url: "https://phorce.taile3ec58.ts.net"
   gallery_port: 8080
 
 web:

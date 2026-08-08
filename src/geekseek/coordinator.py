@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 from typing import Any, Coroutine
 
 from .capture import CaptureDevice
+from .framing_guide import (
+    FULL_BODY,
+    UPPER_BODY,
+    FramingGuidance,
+    SilhouetteTemplate,
+    annotate_framing_frame,
+    evaluate_framing,
+    visible_points,
+)
+from .gallery import Gallery
 from .perception import PersonSensor, PersonSignal, encode_jpeg, is_approaching, is_positioned, is_ready_signal
-from .robot import Robot, burst_poses_for_template
+from .robot import Robot, burst_poses_for_template, pose_for_template
 from .vlm import Greeter
 from .workflow import Event, EventType, InvalidTransition, State, WorkflowContext, apply_event
 
@@ -30,6 +42,10 @@ class Coordinator:
         farewell_seconds: float = 4.0,
         countdown_seconds: float = 0.7,
         ready_timeout_seconds: float = 12.0,
+        photo_target_count: int = 40,
+        slide_seconds: float = 0.0,
+        gallery: Gallery | None = None,
+        framing_templates: dict[str, SilhouetteTemplate] | None = None,
     ) -> None:
         self.context = WorkflowContext()
         self.robot = robot
@@ -44,11 +60,20 @@ class Coordinator:
         self.farewell_seconds = farewell_seconds
         self.countdown_seconds = countdown_seconds
         self.ready_timeout_seconds = ready_timeout_seconds
+        self.photo_target_count = photo_target_count
+        self.slide_seconds = slide_seconds
+        self.gallery = gallery
+        self.framing_templates = framing_templates or {}
+        self.context.photo_target = photo_target_count
         self.debug_frame: bytes | None = None
         self.live_frame: bytes | None = None
         self._last_signal = PersonSignal(detected=False)
         self._last_approaching = False
         self._last_positioned = False
+        self._last_framing_guidance = FramingGuidance(False, "사람을 기다리는 중")
+        self._last_framing_points = {}
+        self._framing_stable_frames = 0
+        self._framing_debug_until = 0.0
         self.events: asyncio.Queue[Event | None] = asyncio.Queue()
         self._runner: asyncio.Task[None] | None = None
         self._sense_task: asyncio.Task[None] | None = None
@@ -61,6 +86,17 @@ class Coordinator:
         if self._runner is not None:
             return
         self._runner = asyncio.create_task(self._run())
+        if hasattr(self.robot, "preflight"):
+            # doctor/list/status 검증. 실패해도 서버는 띄운다 — 로봇 스택을 아직
+            # 안 올렸을 뿐일 수 있고, 그때 웹서버까지 못 뜨면 원인을 볼 화면조차
+            # 없다. 대신 운영자가 반드시 보도록 콘솔로도 알린다: 키오스크 화면은
+            # error 상태에서만 오버레이를 띄우는데, 여기서는 아직 booting이라
+            # context.error만으로는 아무 데도 안 보인다.
+            try:
+                await self.robot.preflight()
+            except Exception as exc:
+                self.context.error = f"로봇 준비 실패: {exc}"
+                print(f"[geekseek] 로봇 사전 검증 실패 — 촬영은 실패합니다: {exc}", file=sys.stderr)
         if self.person_sensor is not None:
             self._sense_task = asyncio.create_task(self._sense_loop())
             if self.frame_source is not None:
@@ -131,7 +167,7 @@ class Coordinator:
             elif self.context.state is State.CAPTURING:
                 self._spawn(self._capture_burst())
             elif self.context.state is State.PREVIEWING:
-                self._spawn(self._timer(EventType.PREVIEW_DONE, self.preview_seconds))
+                self._spawn(self._timer(EventType.PREVIEW_DONE, self._preview_seconds_for_photos()))
             elif self.context.state is State.FAREWELL:
                 self._spawn(self._timer(EventType.FAREWELL_DONE, self.farewell_seconds))
 
@@ -146,6 +182,19 @@ class Coordinator:
             if queue.full():
                 queue.get_nowait()
             queue.put_nowait(snapshot)
+
+    def _preview_seconds_for_photos(self) -> float:
+        """Hold the slideshow long enough to actually show every photo once.
+
+        The guide cycles a photo every `slide_seconds`; a fixed 3 s was fine
+        for a three-shot burst but shows less than a quarter of a sweep, so a
+        guest would be asked to pick a favourite having seen eight of forty.
+
+        Off (0) unless a config asks for it, so every existing entry point
+        keeps exactly the preview timing it has today — only the phorce sweep,
+        which is the thing that produces dozens of photos, opts in.
+        """
+        return max(self.preview_seconds, len(self.context.photos) * self.slide_seconds)
 
     async def _timer(self, event_type: EventType, seconds: float) -> None:
         await asyncio.sleep(seconds)
@@ -167,6 +216,28 @@ class Coordinator:
             signal: PersonSignal = self.person_sensor.sense(frame)
             approaching = is_approaching(signal)
             positioned = is_positioned(signal)
+            mode = self._selected_framing_mode()
+            debug_override = asyncio.get_running_loop().time() < self._framing_debug_until
+            if self.context.state is State.GUIDING and debug_override:
+                positioned = False
+            elif self.context.state is State.GUIDING and mode in self.framing_templates:
+                points = {}
+                landmarks_list = getattr(self.person_sensor, "latest_landmarks", ())
+                if signal.detected and len(landmarks_list) == 1:
+                    points = visible_points(landmarks_list[0], 0.2)
+                guidance = evaluate_framing(self.framing_templates[mode], points)
+                self._framing_stable_frames = (
+                    self._framing_stable_frames + 1 if guidance.positioned else 0
+                )
+                positioned = self._framing_stable_frames >= 5
+                message = guidance.message
+                if guidance.positioned and not positioned:
+                    message = "잠시 그대로 서 주세요"
+                self._last_framing_points = points
+                self._last_framing_guidance = guidance
+                self._patch_framing(guidance, message, positioned)
+            else:
+                self._framing_stable_frames = 0
             self._last_signal = signal
             self._last_approaching = approaching
             self._last_positioned = positioned
@@ -200,7 +271,39 @@ class Coordinator:
                     frame, self._last_signal, self._last_approaching, self._last_positioned
                 )
             if hasattr(self.person_sensor, "mirror_jpeg"):
-                self.live_frame = self.person_sensor.mirror_jpeg(frame)
+                live_frame = frame
+                mode = self._selected_framing_mode()
+                if self.context.state is State.GUIDING and mode in self.framing_templates:
+                    live_frame = annotate_framing_frame(
+                        frame,
+                        self.framing_templates[mode],
+                        self._last_framing_points,
+                        self._last_framing_guidance,
+                    )
+                self.live_frame = self.person_sensor.mirror_jpeg(live_frame)
+
+    def _selected_framing_mode(self) -> str | None:
+        return {
+            "full_body": FULL_BODY,
+            "upper_body": UPPER_BODY,
+        }.get(self.context.template_id or "")
+
+    def _patch_framing(
+        self,
+        guidance: FramingGuidance,
+        message: str,
+        positioned: bool,
+    ) -> None:
+        values = {
+            "framing_message": message,
+            "framing_direction": guidance.direction,
+            "framing_scale": round(guidance.scale_ratio, 3),
+            "framing_inside": guidance.inside_count,
+            "framing_required": guidance.required_count,
+            "framing_positioned": positioned,
+        }
+        if any(getattr(self.context, key) != value for key, value in values.items()):
+            self._patch(**values)
 
     async def _generate_greeting(self) -> None:
         """Fire-and-forget VLM caption for the greeting caption. Never blocks
@@ -242,18 +345,44 @@ class Coordinator:
         self._patch(countdown=None)
 
         photos: list[str] = []
+        files: list[Path] = []
+
+        async def shoot(_: object = None) -> None:
+            result = await self.capture.capture()
+            photos.append(result.photo_url)
+            if result.path is not None:
+                files.append(result.path)
+            # Publish after every shot (not just at the end) so the guide
+            # screen can flash each captured frame as it lands instead of
+            # only jumping from 0 to N at burst completion.
+            self._patch(photos=list(photos))
+
+        sweeping = hasattr(self.robot, "sweep")
+        poses = burst_poses_for_template(self.context.template_id or "")
+        # The two paths take wildly different shot counts, so publish the one
+        # that's actually about to run — the guide screen shows it as "n / N".
+        self._patch(photo_target=self.photo_target_count if sweeping else len(poses))
+
         try:
-            for pose in burst_poses_for_template(self.context.template_id or ""):
-                await self.robot.move_to(pose)
-                result = await self.capture.capture()
-                photos.append(result.photo_url)
-                # Publish after every shot (not just at the end) so the guide
-                # screen can flash each captured frame as it lands instead of
-                # only jumping from 0 to 3 at burst completion.
-                self._patch(photos=list(photos))
+            if sweeping:
+                # Real arm: one pre-loaded slot sweeps every framing while the
+                # shutter fires on the schedule baked into that slot.
+                await self.robot.sweep(
+                    pose_for_template(self.context.template_id or ""),
+                    shoot,
+                    self.photo_target_count,
+                )
+            else:
+                for pose in poses:
+                    await self.robot.move_to(pose)
+                    await shoot()
         except Exception as exc:
             await self.emit(EventType.CAPTURE_FAILED, reason=str(exc))
         else:
+            if self.gallery is not None and self.gallery.enabled and files:
+                # 이 촬영 건만 열리는 링크. 사진 디렉토리를 통째로 노출하면
+                # 앞 손님 사진까지 같이 보인다.
+                self._patch(gallery_url=self.gallery.url_for(self.gallery.publish(files)))
             await self.emit(EventType.BURST_COMPLETE, photos=photos)
 
     def _patch(self, **fields: object) -> None:

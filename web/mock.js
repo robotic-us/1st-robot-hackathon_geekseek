@@ -60,7 +60,7 @@
 
   let stage = 1;
   let workflowState = "booting";
-  let context = {state: "booting", template_id: null, photos: [], hint: "", error: "", greeting_line: null, countdown: null, awaiting_ready: false, revision: 0};
+  let context = {state: "booting", template_id: null, photos: [], hint: "", error: "", greeting_line: null, countdown: null, awaiting_ready: false, photo_target: 0, gallery_url: "", framing_message: "사람을 기다리는 중", framing_direction: "detect", framing_scale: 0, framing_inside: 0, framing_required: 0, framing_positioned: false, revision: 0};
   let stageTimer = null;
   let effectTimer = null;
   let effectTimeout = null;
@@ -462,9 +462,10 @@
     const burstCount = $("#burst-count");
     const progress = $("#burst-progress");
     const photoName = $("#pose-name");
-    if (burstCount) burstCount.textContent = `촬영 중 · ${count} / 3`;
-    if (progress) progress.style.width = `${Math.min(count / 3, 1) * 100}%`;
-    if (photoName) photoName.textContent = `PHOTO ${count} / 3`;
+    const total = context.photo_target > 0 ? context.photo_target : 3;
+    if (burstCount) burstCount.textContent = `촬영 중 · ${count} / ${total}`;
+    if (progress) progress.style.width = `${Math.min(count / total, 1) * 100}%`;
+    if (photoName) photoName.textContent = `PHOTO ${count} / ${total}`;
 
     if (workflowState === "capturing" && count > previous.photos.length) {
       playShutterSound();
@@ -517,6 +518,25 @@
     overlay.hidden = !context.awaiting_ready;
   }
 
+  function updateFramingGuide() {
+    if (page !== "guide") return;
+    const arrows = {forward: "↑", back: "↓", left: "←", right: "→", hold: "✓", align: "◎", detect: "◇"};
+    const instruction = $("#framing-instruction");
+    const arrow = $("#framing-arrow");
+    const message = $("#framing-message");
+    const detail = $("#framing-detail");
+    const mode = $("#framing-mode");
+    if (mode) mode.textContent = context.template_id === "upper_body" ? "상반신 구도" : "전신 구도";
+    if (arrow) arrow.textContent = arrows[context.framing_direction] || "◇";
+    if (message) message.textContent = context.framing_message || "몸을 실루엣에 맞춰주세요";
+    if (detail) {
+      detail.textContent = context.framing_required
+        ? `실루엣 ${context.framing_inside}/${context.framing_required} · 크기 ${context.framing_scale.toFixed(2)} / 1.00`
+        : "주황색 범위 안에 흰색 스켈레톤을 맞춰주세요";
+    }
+    instruction?.classList.toggle("positioned", context.framing_positioned);
+  }
+
   function syncSlideshowPhotos() {
     const frame = $("#slideshow-frame");
     const film = $("#film-strip");
@@ -552,7 +572,8 @@
       dot.classList.toggle("active", index === 0);
       film.append(dot);
     });
-    film.style.gridTemplateColumns = `repeat(${context.photos.length}, 1fr)`;
+    // 한 줄에 20칸까지만 — 40장을 한 줄에 밀어넣으면 칸당 13px짜리 점선이 된다.
+    film.style.gridTemplateColumns = `repeat(${Math.min(context.photos.length, 20)}, 1fr)`;
     updateSlide();
   }
 
@@ -580,6 +601,7 @@
     if (page === "guide") {
       updateCountdown();
       updateReadyOverlay();
+      updateFramingGuide();
     }
     if (workflowState === "capturing") updateCaptureData(previous);
     if (workflowState === "previewing" && page === "guide") syncSlideshowPhotos();
@@ -641,7 +663,7 @@
   function updateControls() {
     const deciding = workflowState === "deciding";
     const asking = workflowState === "asking";
-    $("#start-capture")?.toggleAttribute("disabled", !deciding || actionPending);
+    $$(".shot-choice").forEach((button) => button.toggleAttribute("disabled", !deciding || actionPending));
     $("#decline")?.toggleAttribute("disabled", !deciding || actionPending);
     $("#review-again")?.toggleAttribute("disabled", !asking || actionPending);
     $("#review-like")?.toggleAttribute("disabled", !asking || actionPending);
@@ -697,12 +719,20 @@
     const next = {
       state: snapshot.state,
       template_id: snapshot.template_id ?? null,
+      photo_target: snapshot.photo_target ?? 0,
+      gallery_url: snapshot.gallery_url ?? "",
       photos: Array.isArray(snapshot.photos) ? snapshot.photos : [],
       hint: snapshot.hint || "",
       error: snapshot.error || "",
       greeting_line: snapshot.greeting_line ?? null,
       countdown: snapshot.countdown ?? null,
       awaiting_ready: Boolean(snapshot.awaiting_ready),
+      framing_message: snapshot.framing_message || "사람을 기다리는 중",
+      framing_direction: snapshot.framing_direction || "detect",
+      framing_scale: Number(snapshot.framing_scale) || 0,
+      framing_inside: Number(snapshot.framing_inside) || 0,
+      framing_required: Number(snapshot.framing_required) || 0,
+      framing_positioned: Boolean(snapshot.framing_positioned),
       revision: Number.isFinite(snapshot.revision) ? snapshot.revision : 0,
     };
     const stateChanged = next.state !== workflowState;
@@ -730,35 +760,28 @@
   }
 
   function drawQrCodes() {
-    $$(".qr-canvas").forEach((canvas) => drawQr(canvas));
-  }
-
-  function drawQr(canvas) {
-    const drawing = canvas.getContext("2d");
-    const modules = 29;
-    const quiet = 3;
-    const unit = canvas.width / (modules + quiet * 2);
-    const reserved = new Set();
-    drawing.fillStyle = "#f7f8ff";
-    drawing.fillRect(0, 0, canvas.width, canvas.height);
-    drawing.fillStyle = "#101522";
-    const cell = (x, y) => drawing.fillRect((x + quiet) * unit, (y + quiet) * unit, Math.ceil(unit), Math.ceil(unit));
-    const finder = (startX, startY) => {
-      for (let y = 0; y < 7; y += 1) {
-        for (let x = 0; x < 7; x += 1) {
-          reserved.add(`${startX + x},${startY + y}`);
-          if (x === 0 || x === 6 || y === 0 || y === 6 || (x >= 2 && x <= 4 && y >= 2 && y <= 4)) cell(startX + x, startY + y);
-        }
+    // QR은 서버가 context.gallery_url을 인코딩해 SVG로 내려준다. 링크가 아직
+    // 없으면(갤러리 미설정, 또는 촬영 전) 코드가 아니라 안내 문구를 띄운다 —
+    // 스캔되지 않는 그림을 QR처럼 보여주면 손님이 계속 찍어보게 된다.
+    const ready = Boolean(context.gallery_url);
+    $$(".qr-card").forEach((card) => {
+      const image = card.querySelector(".qr-image");
+      if (!image) return;
+      let pending = card.querySelector(".qr-pending");
+      if (!pending) {
+        pending = document.createElement("div");
+        pending.className = "qr-pending";
+        image.after(pending);
       }
-    };
-    finder(0, 0); finder(modules - 7, 0); finder(0, modules - 7);
-    for (let y = 0; y < modules; y += 1) {
-      for (let x = 0; x < modules; x += 1) {
-        if (reserved.has(`${x},${y}`)) continue;
-        const pattern = (x * 17 + y * 31 + x * y * 3 + (x ^ y) * 7) % 11;
-        if (pattern < 5 && !((x < 8 && y < 8) || (x > modules - 9 && y < 8) || (x < 8 && y > modules - 9))) cell(x, y);
+      image.hidden = !ready;
+      pending.hidden = ready;
+      if (ready) {
+        const wanted = `/api/qr.svg?rev=${encodeURIComponent(context.gallery_url)}`;
+        if (image.getAttribute("src") !== wanted) image.setAttribute("src", wanted);
+      } else {
+        pending.textContent = "사진 링크를 준비하고 있어요";
       }
-    }
+    });
   }
 
   function setupCameraFeeds() {
@@ -784,7 +807,9 @@
 
   $("#carousel-prev")?.addEventListener("click", () => { carouselIndex = (carouselIndex + poseExampleCount - 1) % poseExampleCount; updateCarousel(); });
   $("#carousel-next")?.addEventListener("click", () => { carouselIndex = (carouselIndex + 1) % poseExampleCount; updateCarousel(); });
-  $("#start-capture")?.addEventListener("click", () => runAction("/api/capture-started", {template_id: DEFAULT_TEMPLATE}));
+  $$(".shot-choice").forEach((button) => button.addEventListener("click", () => {
+    runAction("/api/capture-started", {template_id: button.dataset.template});
+  }));
   $("#decline")?.addEventListener("click", () => runAction("/api/decline"));
   $("#review-again")?.addEventListener("click", () => runAction("/api/replay"));
   $("#review-like")?.addEventListener("click", () => runAction("/api/liked"));

@@ -31,8 +31,11 @@ class WebAppCaptureTests(unittest.IsolatedAsyncioTestCase):
         result = await capture.capture()
 
         self.assertEqual(socket.sent, ["capture"])
-        self.assertEqual(result.photo_url, "/photos/phone_1.jpg")
-        self.assertEqual((capture.save_dir / "phone_1.jpg").read_bytes(), b"jpeg-bytes")
+        # 파일명은 타임스탬프 기반 — 서버를 다시 띄워도 앞 세션 사진을 덮지 않는다.
+        saved = list(capture.save_dir.glob("phone_*.jpg"))
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(result.photo_url, f"/photos/{saved[0].name}")
+        self.assertEqual(saved[0].read_bytes(), b"jpeg-bytes")
 
     async def test_capture_times_out_if_no_frame_arrives(self) -> None:
         capture = WebAppCapture(save_dir=self._tmp_dir(), timeout_seconds=0.05)

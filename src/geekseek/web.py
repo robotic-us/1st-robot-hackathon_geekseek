@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .capture import WebAppCapture
 from .coordinator import Coordinator
+from .gallery import qr_svg
 from .workflow import EventType, State
 
 
@@ -153,6 +154,82 @@ def create_app(coordinator: Coordinator) -> FastAPI:
         # someone centered — handy for testing the countdown/burst UI without
         # a person in front of the camera.
         return await emit(EventType.POSITION_REACHED, {State.GUIDING})
+
+    @app.post("/api/debug/start-guide/{template_id}", include_in_schema=False)
+    async def debug_start_guide(template_id: str) -> dict[str, object]:
+        """Enter the real guide scene without moving a robot.
+
+        Used on the fake/no-robot kiosk configuration to visually verify the
+        live iPad overlay. Production still follows the ordinary approach and
+        shot-selection flow.
+        """
+        if template_id not in {"full_body", "upper_body"}:
+            raise HTTPException(status_code=422, detail="unknown template_id")
+        if coordinator.context.state is State.WAITING:
+            revision = coordinator.context.revision
+            await coordinator.emit(EventType.PERSON_APPROACHED)
+            await coordinator.wait_for_revision(revision + 1)
+        if coordinator.context.state is State.GREETING:
+            revision = coordinator.context.revision
+            await coordinator.emit(EventType.GREETING_DONE)
+            await coordinator.wait_for_revision(revision + 1)
+        return await emit(
+            EventType.CAPTURE_STARTED,
+            {State.DECIDING},
+            template_id=template_id,
+        )
+
+    @app.post("/api/debug/framing/{direction}", include_in_schema=False)
+    async def debug_framing(direction: str) -> dict[str, object]:
+        """Preview each iPad movement instruction on a fake/no-robot run."""
+        messages = {
+            "forward": "앞으로 이동하세요",
+            "back": "뒤로 이동하세요",
+            "left": "화면 왼쪽으로 이동하세요",
+            "right": "화면 오른쪽으로 이동하세요",
+            "align": "관절을 실루엣 안에 맞춰주세요",
+            "hold": "좋습니다 · 그대로 서 주세요",
+        }
+        if direction not in messages:
+            raise HTTPException(status_code=422, detail="unknown framing direction")
+        if coordinator.context.state is not State.GUIDING:
+            raise HTTPException(status_code=409, detail="framing preview requires guiding state")
+        coordinator._framing_debug_until = asyncio.get_running_loop().time() + 5.0
+        mode = coordinator._selected_framing_mode()
+        if mode in coordinator.framing_templates:
+            template = coordinator.framing_templates[mode]
+            centers = [band.center for band in template.joints.values()]
+            center_x = sum(point.x for point in centers) / len(centers)
+            center_y = sum(point.y for point in centers) / len(centers)
+            scale = 0.78 if direction == "forward" else 1.24 if direction == "back" else 1.0
+            shift_x = -0.08 if direction == "right" else 0.08 if direction == "left" else 0.0
+            coordinator._last_framing_points = {
+                index: type(band.center)(
+                    center_x + (band.center.x - center_x) * scale + shift_x,
+                    center_y + (band.center.y - center_y) * scale,
+                )
+                for index, band in template.joints.items()
+            }
+        coordinator._patch(
+            framing_message=messages[direction],
+            framing_direction=direction,
+            framing_scale=0.78 if direction == "forward" else 1.24 if direction == "back" else 1.0,
+            framing_inside=4 if direction == "hold" else 2,
+            framing_required=4,
+            framing_positioned=direction == "hold",
+        )
+        return coordinator.context.as_dict()
+
+    @app.get("/api/qr.svg", include_in_schema=False)
+    async def qr_code() -> Response:
+        url = coordinator.context.gallery_url
+        if not url:
+            raise HTTPException(status_code=404, detail="아직 갤러리 링크가 없습니다")
+        return Response(
+            qr_svg(url),
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/events")
     async def events() -> StreamingResponse:

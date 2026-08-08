@@ -61,22 +61,52 @@ def main() -> None:
 
     import uvicorn
 
+    from .app import build_gallery
+    from .gallery import create_gallery_app
     from .web import create_app
 
     config = load_config(args.config)
+    gallery = build_gallery(config)
     debug_window = _launch_debug_window(config) if config.runtime.debug_window else None
+    kiosk = uvicorn.Config(
+        create_app(build_coordinator(config, gallery)),
+        host=config.web.host,
+        port=config.web.port,
+        log_level="info",
+        ssl_keyfile=config.web.ssl_keyfile,
+        ssl_certfile=config.web.ssl_certfile,
+    )
     try:
-        uvicorn.run(
-            create_app(build_coordinator(config)),
-            host=config.web.host,
-            port=config.web.port,
-            log_level="info",
-            ssl_keyfile=config.web.ssl_keyfile,
-            ssl_certfile=config.web.ssl_certfile,
+        if not gallery.enabled:
+            uvicorn.Server(kiosk).run()
+            return
+        # The guest gallery gets its own plain-HTTP port for a tunnel to
+        # publish under a real certificate. It cannot share the kiosk's port:
+        # that one serves the phone's camera page, which needs HTTPS, and the
+        # kiosk's certificate is self-signed — the exact warning screen the
+        # separate origin exists to avoid.
+        print(f"[geekseek] gallery: {gallery.base_url} (local :{config.runtime.gallery_port})")
+        asyncio.run(
+            _serve_both(
+                kiosk,
+                uvicorn.Config(
+                    create_gallery_app(gallery),
+                    host="127.0.0.1",
+                    port=config.runtime.gallery_port,
+                    log_level="warning",
+                ),
+            )
         )
     finally:
         if debug_window is not None and debug_window.poll() is None:
             debug_window.terminate()
+
+
+async def _serve_both(*configs) -> None:
+    import uvicorn
+
+    servers = [uvicorn.Server(config) for config in configs]
+    await asyncio.gather(*(server.serve() for server in servers))
 
 
 if __name__ == "__main__":

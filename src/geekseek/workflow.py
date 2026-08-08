@@ -50,6 +50,14 @@ class WorkflowContext:
     greeting_line: str | None = None  # VLM 개인화 인사말 (2단계), 없으면 프런트가 기본 캡션 사용
     countdown: int | None = None  # 5단계 촬영 시작 전 3-2-1 카운트다운, 끝나면 None
     awaiting_ready: bool = False  # 5단계 정위치 도달 후, 카운트다운 전 "손 들어 준비완료" 대기 중
+    photo_target: int = 0  # 이번 촬영에서 예상되는 장수 — 진행률 표시용 (0이면 미정)
+    gallery_url: str = ""  # 손님이 QR로 여는 사진 페이지 (갤러리 비활성이면 빈 값)
+    framing_message: str = "사람을 기다리는 중"
+    framing_direction: str = "detect"
+    framing_scale: float = 0.0
+    framing_inside: int = 0
+    framing_required: int = 0
+    framing_positioned: bool = False
     revision: int = 0
 
     def as_dict(self) -> dict[str, Any]:
@@ -93,6 +101,12 @@ def apply_event(context: WorkflowContext, event: Event) -> None:
         context.template_id = template_id
         context.photos = []
         context.hint = ""
+        context.framing_message = "몸을 실루엣에 맞춰주세요"
+        context.framing_direction = "detect"
+        context.framing_scale = 0.0
+        context.framing_inside = 0
+        context.framing_required = 0
+        context.framing_positioned = False
     elif event.type is EventType.BURST_COMPLETE:
         context.photos = list(event.data.get("photos", []))
     elif event.type is EventType.CAPTURE_FAILED:
@@ -105,6 +119,13 @@ def apply_event(context: WorkflowContext, event: Event) -> None:
         context.greeting_line = None
         context.countdown = None
         context.awaiting_ready = False
+        context.gallery_url = ""
+        context.framing_message = "사람을 기다리는 중"
+        context.framing_direction = "detect"
+        context.framing_scale = 0.0
+        context.framing_inside = 0
+        context.framing_required = 0
+        context.framing_positioned = False
 
     context.state = next_state
     context.revision += 1

@@ -40,6 +40,51 @@ conda run --no-capture-output -n geekseek python -m geekseek --config config/loc
 로그에 `delegate=gpu`가 찍히면 정상. GPU wheel 빌드/환경 구성은
 [`mediapipe-gpu-build.md`](mediapipe-gpu-build.md) 참고.
 
+## 촬영 모션 슬롯 만들기 (phorce)
+
+`calibration/trial_02.csv`에 측정해 둔 관절 각도로 전신/상반신 촬영 궤적을 만들어
+SD카드 슬롯 4·5에 넣는다. 손교시 없이 P-Vector를 직접 계산한다.
+
+```bash
+# 1) 로컬에 생성 (calibration/slots/) — 순서 최적화·스케줄까지 출력
+python3 scripts/build_motion_slots.py
+
+# 2) 확인 후 SD카드로
+python3 scripts/build_motion_slots.py --out /media/phorce/9016-4EF8/Motions
+```
+
+슬롯 하나는 28초다. `phorce play`의 기본 대기 시간이 정확히 30초라, 30초로 만들면
+물리적으로는 완주하고도 결과가 timeout으로 떨어진다.
+
+**SD에 쓴 뒤에는 반드시 언마운트하고 PCM 전원을 껐다 켜야** PCM이 새 파일을 읽는다.
+반영 여부는 `phorce_monitor` 기동 로그의 `적재 슬롯 마스크`로 확인한다
+(슬롯 1~3만 있으면 `0x0E`, 4·5까지 있으면 `0x3E`).
+
+## 실기 로봇 스택 (Jetson)
+
+로봇 전원을 먼저 켜고, 터미널 두 개에서 순서대로. `axes:=5`가 이 로봇 값이다
+(SDK 문서 예시의 `axes:=2`는 벤치용).
+
+```bash
+# 터미널 1 — 재생하려면 mode:=command (측정만 할 땐 safe_op)
+source /opt/ros/humble/setup.bash
+ros2 run agx_phorce_bridge phorce_monitor \
+  --ros-args -p nic:=eno1 -p mode:=command -p axes:=5 -p mbx_enabled:=true
+
+# 터미널 2
+source /opt/ros/humble/setup.bash
+ros2 run agx_motion_slot motion_action_server --ros-args -p backend:=ecat
+```
+
+```bash
+phorce doctor     # 준비 상태 진단
+phorce list       # 적재된 슬롯 확인
+phorce play 4     # 전신 (28초)
+phorce play 5     # 상반신 (28초)
+```
+
+발사한 모션은 중간에 멈출 수 없다. 정지 수단은 E-Stop 물리 버튼뿐이다.
+
 ## 테스트
 
 ```bash

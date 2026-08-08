@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,14 +16,30 @@ class RuntimeConfig:
     person_sensor: str = "fake"
     camera_index: int = 0
     camera_fps: float = 15.0
-    camera_width: int = 640
-    camera_height: int = 480
+    camera_width: int = 1280
+    camera_height: int = 960
+    framing_dataset_dir: str = "calibration/webcam_skeleton_1280x960"
     sense_interval: float = 0.2
     greeting_seconds: float = 3.0
     preview_seconds: float = 3.0
     farewell_seconds: float = 4.0
+    # >0이면 미리보기를 '사진 장수 × 이 값'만큼 늘려 전부 한 번씩 보여준다.
+    slide_seconds: float = 0.0
     vlm_enabled: bool = False
     debug_window: bool = False
+    # robot: phorce — 구도 이름을 SD카드 슬롯 번호로 잇는다. 슬롯은
+    # scripts/build_motion_slots.py가 만들고 slot_dir에 스케줄을 남긴다.
+    phorce_motion_ids: dict[str, int] = field(default_factory=dict)
+    phorce_slot_dir: str = "calibration/slots"
+    # 슬롯 길이(28초)보다 넉넉해야 한다 — phorce 기본값 30초는 경계에 걸린다.
+    phorce_timeout_seconds: float = 45.0
+    phorce_busy_retries: int = 2
+    phorce_busy_retry_seconds: float = 1.0
+    photo_target_count: int = 40
+    # 손님용 갤러리. base_url이 비어 있으면 갤러리도 QR도 뜨지 않는다 —
+    # 기존 설정들은 이 값이 없으므로 동작이 그대로다.
+    gallery_base_url: str = ""
+    gallery_port: int = 8080
 
 
 @dataclass(frozen=True)

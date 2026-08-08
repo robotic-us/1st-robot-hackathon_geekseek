@@ -50,19 +50,29 @@
         <div class="carousel-dots"><i class="active"></i><i></i><i></i><i></i></div>
         <div class="choice-actions">
           <button id="decline" class="choice-secondary" type="button">괜찮아요</button>
-          <button id="start-capture" class="choice-primary" type="button">촬영 시작 <span>→</span></button>
+          <button class="choice-primary shot-choice" type="button" data-template="full_body">
+            <span class="shot-glyph glyph-full" aria-hidden="true"><i class="head"></i><i class="body"></i><i class="legs"></i><em class="crop"></em></span>
+            <b>전신샷</b>
+            <small>머리부터 발끝까지</small>
+          </button>
+          <button class="choice-primary shot-choice" type="button" data-template="upper_body">
+            <span class="shot-glyph glyph-upper" aria-hidden="true"><i class="head"></i><i class="body"></i><i class="legs"></i><em class="crop"></em></span>
+            <b>상반신샷</b>
+            <small>표정 위주로 가깝게</small>
+          </button>
         </div>
       </article>
 
       <article class="guide-scene scene-guide" data-scene="4" hidden>
-        <div class="live-bar"><span><i></i> LIVE GUIDE</span><b>POSITION 01</b></div>
+        <div class="live-bar"><span><i></i> LIVE GUIDE</span><b id="framing-mode">전신 구도</b></div>
         <div class="camera-preview guide-preview">
           <img class="camera-feed" src="/live/camera" alt="실시간 카메라">
           <div class="thirds-grid"><i></i><i></i><i></i><i></i></div>
-          <div class="target-line"></div>
-          <div class="ar-disc"><span></span><i></i><b>여기에 서주세요</b></div>
         </div>
-        <div class="instruction"><span class="direction-arrow">←</span><div><b>왼쪽으로 두 걸음</b><small>원판 중앙에 맞춰주세요</small></div></div>
+        <div id="framing-instruction" class="instruction">
+          <span id="framing-arrow" class="direction-arrow">◇</span>
+          <div><b id="framing-message">몸을 실루엣에 맞춰주세요</b><small id="framing-detail">카메라가 자세를 확인하고 있어요</small></div>
+        </div>
       </article>
 
       <article class="guide-scene scene-burst" data-scene="5" hidden>
@@ -87,15 +97,15 @@
 
       <article class="guide-scene scene-review" data-scene="7" hidden>
         <div class="qr-layout">
-          <div class="qr-card"><canvas class="qr-canvas" width="232" height="232" aria-label="QR 코드 예시"></canvas><span>SCAN TO SAVE</span></div>
+          <div class="qr-card"><img class="qr-image" alt="사진 받기 QR 코드" hidden><span>SCAN TO SAVE</span></div>
           <div class="review-copy"><p class="eyebrow">ALL DONE</p><h2>마음에<br>드시나요?</h2><p>휴대폰 카메라로 QR을 비춰<br>사진을 확인해보세요.</p><div class="review-actions"><button id="review-again" type="button">다시 볼래요</button><button id="review-like" type="button">마음에 들어요 <span>♥</span></button></div></div>
         </div>
       </article>
 
       <article class="guide-scene scene-goodbye" data-scene="8" hidden>
         <div class="goodbye-glow"></div>
-        <div class="qr-card final"><canvas class="qr-canvas" width="232" height="232" aria-label="QR 코드 예시"></canvas><span>PHOTOS READY · 24H</span></div>
-        <div class="goodbye-copy"><span class="success-check">✓</span><p class="eyebrow">SEE YOU AGAIN</p><h2>여기로 사진<br><em>받아가세요</em></h2><p>링크는 24시간 동안 열려 있어요.</p></div>
+        <div class="qr-card final"><img class="qr-image" alt="사진 받기 QR 코드" hidden><span>SCAN TO SAVE</span></div>
+        <div class="goodbye-copy"><span class="success-check">✓</span><p class="eyebrow">SEE YOU AGAIN</p><h2>여기로 사진<br><em>받아가세요</em></h2><p>QR을 지금 찍어 사진을 저장해주세요.</p></div>
       </article>
     </section>
 

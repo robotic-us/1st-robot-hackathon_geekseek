@@ -19,9 +19,19 @@
   const video = document.getElementById("v");
   const canvas = document.getElementById("c");
 
+  // 결과물은 항상 세로 3:4다. 구도(웨이포인트 각도)를 3:4 화면 기준으로 잡았기
+  // 때문에 비율이 바뀌면 프레이밍이 통째로 달라진다.
+  //
+  // 해상도 제약은 힌트일 뿐이라 카메라가 16:9 같은 native 모드로 응답할 수
+  // 있다 — 실제로 그래서 비율이 틀어졌다. 그러니 스트림 비율을 믿지 말고
+  // 캔버스에서 3:4로 잘라낸다.
+  const RATIO = 3 / 4;   // 가로/세로
+  const MAX_HEIGHT = 1440;
+
   async function start() {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
+      // 비율은 아래에서 강제하므로 여기서는 "가능하면 크게"만 요청한다.
+      video: { facingMode: "environment", height: { ideal: MAX_HEIGHT } },
       audio: false,
     });
     video.srcObject = stream;
@@ -32,16 +42,35 @@
     ws.onerror = () => (statusEl.textContent = "websocket error");
     ws.onmessage = (event) => {
       if (event.data !== "capture") return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext("2d").drawImage(video, 0, 0);
+      const sw = video.videoWidth;
+      const sh = video.videoHeight;
+
+      // 프레임 안에서 잡을 수 있는 가장 큰 3:4 영역을 가운데로 잘라낸다.
+      let cropW = Math.min(sw, sh * RATIO);
+      let cropH = cropW / RATIO;
+      if (cropH > sh) {
+        cropH = sh;
+        cropW = cropH * RATIO;
+      }
+      const outH = Math.min(MAX_HEIGHT, Math.round(cropH));
+      canvas.height = outH;
+      canvas.width = Math.round(outH * RATIO);
+      canvas.getContext("2d").drawImage(
+        video,
+        (sw - cropW) / 2, (sh - cropH) / 2, cropW, cropH,
+        0, 0, canvas.width, canvas.height
+      );
+
       canvas.toBlob(
         (blob) => {
           ws.send(blob);
-          statusEl.textContent = "captured & sent at " + new Date().toLocaleTimeString();
+          statusEl.textContent =
+            `stream ${sw}x${sh} → saved ${canvas.width}x${canvas.height} · ` +
+            `${Math.round(blob.size / 1024)}KB · ` +
+            new Date().toLocaleTimeString();
         },
         "image/jpeg",
-        0.92
+        0.9
       );
     };
   }

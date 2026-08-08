@@ -15,6 +15,7 @@ dependencies = [
   "opencv-python>=4.9",
   "pygame>=2.6",
   "PyYAML>=6.0",
+  "segno>=1.6",
   "uvicorn[standard]>=0.34",
 ]
 

@@ -1,6 +1,14 @@
 import unittest
 
-from geekseek.perception import FakePersonSensor, PersonSignal, is_approaching, is_positioned
+import numpy as np
+
+from geekseek.perception import (
+    FakePersonSensor,
+    PersonSignal,
+    center_crop_to_aspect,
+    is_approaching,
+    is_positioned,
+)
 
 
 class PerceptionTests(unittest.TestCase):
@@ -29,6 +37,17 @@ class PerceptionTests(unittest.TestCase):
         self.assertTrue(is_positioned(centered))
         self.assertFalse(is_positioned(off_frame))
         self.assertFalse(is_positioned(undetected))
+
+    def test_center_crop_4_by_3_source_to_3_by_4_without_resize(self) -> None:
+        frame = np.zeros((960, 1280, 3), dtype=np.uint8)
+        cropped = center_crop_to_aspect(frame, 3, 4)
+        self.assertEqual(cropped.shape, (960, 720, 3))
+        self.assertTrue(np.shares_memory(frame, cropped))
+
+    def test_center_crop_rejects_invalid_aspect(self) -> None:
+        frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        with self.assertRaises(ValueError):
+            center_crop_to_aspect(frame, 0, 4)
 
 
 if __name__ == "__main__":

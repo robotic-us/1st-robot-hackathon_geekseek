@@ -10,6 +10,12 @@ runtime:
   camera_index: 0
   debug_window: true
 
+  # 손님용 사진 페이지 (QR). Tailscale Funnel이 아래 로컬 포트를 진짜 인증서가
+  # 붙은 공개 주소로 내보낸다:  sudo tailscale funnel --bg 8080
+  # 비워두면 갤러리도 QR도 뜨지 않는다.
+  gallery_base_url: "https://phorce.taile3ec58.ts.net"
+  gallery_port: 8080
+
 web:
   host: 0.0.0.0
   port: 8443
