@@ -62,19 +62,25 @@ python3 scripts/build_motion_slots.py --out /media/phorce/9016-4EF8/Motions
 
 ## 실기 로봇 스택 (Jetson)
 
-로봇 전원을 먼저 켜고, 터미널 두 개에서 순서대로. `axes:=5`가 이 로봇 값이다
-(SDK 문서 예시의 `axes:=2`는 벤치용).
-
 ```bash
-# 터미널 1 — 재생하려면 mode:=command (측정만 할 땐 safe_op)
+# 터미널 1 — 로봇 전원을 먼저 켠 뒤
 source /opt/ros/humble/setup.bash
 ros2 run agx_phorce_bridge phorce_monitor \
-  --ros-args -p nic:=eno1 -p mode:=command -p axes:=5 -p mbx_enabled:=true
+  --ros-args -p nic:=eno1 -p mode:=command -p axes:=2 -p mbx_enabled:=true
 
 # 터미널 2
 source /opt/ros/humble/setup.bash
 ros2 run agx_motion_slot motion_action_server --ros-args -p backend:=ecat
 ```
+
+`axes`는 **모드마다 다르다.** `command`(재생)는 PCM powered profile이 `axes:=2`만
+허용하고 다른 값은 기동 자체가 거부된다:
+
+```
+[FATAL] command 모드 거부: 현재 pcm powered profile은 axes:=2만 허용합니다
+```
+
+`safe_op`(측정)에서는 `axes:=5`를 쓴다 — `tool_command.md`의 pose 측정 절차가 그것이다.
 
 ```bash
 phorce doctor     # 준비 상태 진단
