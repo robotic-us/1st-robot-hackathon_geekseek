@@ -1,0 +1,153 @@
+{
+  "units": "STL unit; interpreted as mm by phact-401 drawing match",
+  "assembly_triangles": 365424,
+  "assembly_shells": 150,
+  "assembly_bbox_min": [
+    -182.0,
+    -134.41571044921875,
+    -8.000000953674316
+  ],
+  "assembly_bbox_max": [
+    150.0,
+    134.41571044921875,
+    444.0
+  ],
+  "assembly_dimensions": [
+    332.0,
+    268.8314208984375,
+    452.0000009536743
+  ],
+  "phact_reference_largest_shell_dimensions": [
+    84.99803924560547,
+    34.0,
+    84.99803924560547
+  ],
+  "detected_phact_housings": [
+    {
+      "joint": "A1",
+      "shell": 4,
+      "center": [
+        0.0,
+        0.0,
+        9.0
+      ],
+      "dimensions": [
+        84.99803924560547,
+        84.99803924560547,
+        34.0
+      ],
+      "axis_representative": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "axis_sign_known": false
+    },
+    {
+      "joint": "A2",
+      "shell": 1,
+      "center": [
+        0.0,
+        17.5,
+        129.0
+      ],
+      "dimensions": [
+        84.99993896484375,
+        34.0,
+        84.99993896484375
+      ],
+      "axis_representative": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "axis_sign_known": false
+    },
+    {
+      "joint": "A3",
+      "shell": 5,
+      "center": [
+        0.0,
+        17.5,
+        277.0
+      ],
+      "dimensions": [
+        84.99993896484375,
+        34.0,
+        84.99993896484375
+      ],
+      "axis_representative": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "axis_sign_known": false
+    },
+    {
+      "joint": "A4",
+      "shell": 2,
+      "center": [
+        0.0,
+        17.5,
+        385.0
+      ],
+      "dimensions": [
+        84.99993896484375,
+        34.0,
+        84.99993896484375
+      ],
+      "axis_representative": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "axis_sign_known": false
+    },
+    {
+      "joint": "A5",
+      "shell": 3,
+      "center": [
+        -108.0,
+        0.0,
+        367.5
+      ],
+      "dimensions": [
+        84.99993896484375,
+        84.99993896484375,
+        34.0
+      ],
+      "axis_representative": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "axis_sign_known": false
+    }
+  ],
+  "center_to_center_distances": [
+    121.26932835634904,
+    148.0,
+    108.0,
+    110.79936822924579
+  ],
+  "bearing_reference_largest_shell_dimensions": [
+    7.0,
+    47.0,
+    47.0
+  ],
+  "detected_bearing_like_shells": [
+    {
+      "shell": 16,
+      "center": [
+        -0.005110740661621094,
+        -16.5,
+        129.0
+      ],
+      "dimensions": [
+        46.98977851867676,
+        7.0,
+        46.991973876953125
+      ]
+    }
+  ]
+}
