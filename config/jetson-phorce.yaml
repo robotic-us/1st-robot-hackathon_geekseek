@@ -8,6 +8,11 @@ runtime:
   capture: webapp
   person_sensor: mediapipe
   camera_index: 0
+  camera_fps: 15.0
+  camera_width: 1280
+  camera_height: 960
+  camera_fourcc: MJPG
+  framing_dataset_dir: calibration/webcam_skeleton_1280x960
   debug_window: true
 
   # 구도 → SD카드 슬롯. 슬롯 파일은 scripts/build_motion_slots.py가 만들고,
@@ -28,10 +33,10 @@ runtime:
   # 남는 예산이 정지 구간 → 이동 구간 순으로 채워진다(최대 2Hz).
   photo_target_count: 40
 
-  # 미리보기는 가이드 화면이 사진 하나당 0.36초씩 넘긴다. 40장이면 고정 3초로는
+  # 미리보기는 가이드 화면이 사진 하나당 0.288초씩 넘긴다. 40장이면 고정 3초로는
   # 8장밖에 못 보고 "마음에 드시나요?"로 넘어가므로, 장수에 맞춰 늘린다.
   # (fake 로봇은 3장이라 이 값이 필요 없어서 no-robot 설정에는 없다.)
-  slide_seconds: 0.36
+  slide_seconds: 0.288
 
   # 손님용 사진 페이지 (QR). Tailscale Funnel이 아래 로컬 포트를 진짜 인증서가
   # 붙은 공개 주소로 내보낸다:  sudo tailscale funnel --bg 8080

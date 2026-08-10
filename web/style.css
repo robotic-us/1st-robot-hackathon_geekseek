@@ -38,6 +38,12 @@ button.primary { border-color: transparent; background: linear-gradient(135deg, 
 .debug-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; flex: 1; align-items: center; }
 .debug-buttons { margin-top: 32px; }
 .debug-buttons button { padding: 14px 18px; }
+/* 운영자가 인식을 대신 눌러주는 버튼들. 평소 흐름이 아니라는 게 한눈에
+   보여야 해서 호박색으로 구분하고, 앞의 eyebrow가 이미 간격을 주므로
+   위 여백은 줄인다. */
+.skip-buttons { margin-top: 12px; }
+.skip-buttons button { border-color: #7a5a1d; color: #ffcf7a; }
+.skip-buttons button:not(:disabled):hover { background: rgba(255, 176, 46, .14); }
 pre { min-height: 420px; padding: 26px; border: 1px solid #31384d; border-radius: 22px; background: rgba(5,8,15,.75); color: #aebaff; font-size: 1rem; overflow: auto; }
 nav { display: flex; gap: 18px; margin-top: 26px; }
 a { color: #aebaff; }

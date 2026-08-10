@@ -34,17 +34,75 @@
   async function start() {
     const stream = await navigator.mediaDevices.getUserMedia({
       // 비율은 아래에서 강제하므로 여기서는 "가능하면 크게"만 요청한다.
-      video: {
-        facingMode: "environment",
-        aspectRatio: { ideal: RATIO },   // 3:4 모드가 있으면 그대로 받아 크롭이 없다
-        height: { ideal: MAX_HEIGHT },
-      },
+      // Waypoint 측정 페이지와 같은 조건으로 후면 카메라만 요청한다.
+      // 해상도와 비율은 Safari가 고르고, 결과 3:4는 아래 Canvas에서 맞춘다.
+      video: { facingMode: "environment" },
       audio: false,
     });
     video.srcObject = stream;
 
+    const track = stream.getVideoTracks()[0];
+    const initialCapabilities = track.getCapabilities ? track.getCapabilities() : {};
+    // Pin the ordinary iPhone 1x view. Safari can preserve a previous zoom
+    // when the page/server reconnects, so relying on its implicit default can
+    // make otherwise identical runtime YAMLs appear to use different framing.
+    if (
+      initialCapabilities.zoom
+      && initialCapabilities.zoom.min <= 1
+      && initialCapabilities.zoom.max >= 1
+    ) {
+      try {
+        await track.applyConstraints({advanced: [{zoom: 1}]});
+      } catch (_) {
+        // Older Safari versions expose no constrainable zoom; keep the native view.
+      }
+    }
+    const s = track.getSettings ? track.getSettings() : {};
+    const info = [
+      `${s.width || "?"}x${s.height || "?"}`,
+      s.zoom !== undefined ? `zoom ${s.zoom}` : null,
+      track.label || null,
+    ].filter(Boolean).join(" · ");
+
     const ws = new WebSocket(`wss://${location.host}/phone-ws`);
-    ws.onopen = () => (statusEl.textContent = "connected, waiting for capture signal");
+    const sendMetadata = async () => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const settings = track.getSettings ? track.getSettings() : {};
+      const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+      let videoDevices = [];
+      try {
+        videoDevices = (await navigator.mediaDevices.enumerateDevices())
+          .filter((device) => device.kind === "videoinput")
+          .map((device) => ({label: device.label, device_id: device.deviceId}));
+      } catch (_) {
+        // Camera metadata below is still useful when device enumeration is unavailable.
+      }
+      ws.send(JSON.stringify({
+        type: "camera_metadata",
+        track_label: track.label || null,
+        track_width: settings.width ?? null,
+        track_height: settings.height ?? null,
+        track_aspect_ratio: settings.aspectRatio ?? null,
+        track_zoom: settings.zoom ?? null,
+        track_device_id: settings.deviceId ?? null,
+        track_group_id: settings.groupId ?? null,
+        zoom_capability: capabilities.zoom ?? null,
+        facing_mode: settings.facingMode ?? null,
+        video_devices: videoDevices,
+        video_width: video.videoWidth || null,
+        video_height: video.videoHeight || null,
+        screen_width: screen.width,
+        screen_height: screen.height,
+        screen_orientation: screen.orientation?.type ?? null,
+        screen_angle: screen.orientation?.angle ?? window.orientation ?? null,
+      }));
+    };
+    ws.onopen = () => {
+      statusEl.textContent = `connected · ${info}`;
+      sendMetadata();
+    };
+    video.addEventListener("loadedmetadata", sendMetadata);
+    video.addEventListener("resize", sendMetadata);
     ws.onclose = () => (statusEl.textContent = "disconnected");
     ws.onerror = () => (statusEl.textContent = "websocket error");
     ws.onmessage = (event) => {

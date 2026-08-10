@@ -53,6 +53,15 @@ class WebAppCaptureTests(unittest.IsolatedAsyncioTestCase):
         capture.unbind(second)
         self.assertFalse(capture.connected)
 
+    async def test_camera_metadata_is_replaced_by_latest_report(self) -> None:
+        capture = WebAppCapture(save_dir=self._tmp_dir())
+        capture.update_camera_metadata({"video_width": 1920, "video_height": 1440})
+        capture.update_camera_metadata({"video_width": 1440, "video_height": 1920})
+        self.assertEqual(
+            capture.camera_metadata,
+            {"video_width": 1440, "video_height": 1920},
+        )
+
     def _tmp_dir(self):
         import tempfile
         from pathlib import Path

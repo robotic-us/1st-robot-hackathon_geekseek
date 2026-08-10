@@ -260,16 +260,19 @@ class WebcamFrameSource:
         target_fps: float = 15.0,
         frame_width: int = 1280,
         frame_height: int = 960,
+        fourcc: str = "MJPG",
     ) -> None:
         import cv2
 
+        if len(fourcc) != 4:
+            raise ValueError(f"camera FOURCC must be four characters: {fourcc!r}")
         self._capture = cv2.VideoCapture(camera_index)
         if not self._capture.isOpened():
             raise RuntimeError(f"could not open camera index {camera_index}")
         # C270 only delivers high resolution at useful frame rates through its
         # compressed MJPEG mode. FOURCC must be selected before dimensions;
         # otherwise 1280x960 negotiates YUY2 at only 5-7.5 fps.
-        self._capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self._capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
         self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
         self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
         self._capture.set(cv2.CAP_PROP_FPS, target_fps)

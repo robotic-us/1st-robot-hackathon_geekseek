@@ -18,6 +18,7 @@ class RuntimeConfig:
     camera_fps: float = 15.0
     camera_width: int = 1280
     camera_height: int = 960
+    camera_fourcc: str = "MJPG"
     framing_dataset_dir: str = "calibration/webcam_skeleton_1280x960"
     sense_interval: float = 0.2
     greeting_seconds: float = 3.0

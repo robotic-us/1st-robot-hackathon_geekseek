@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -48,6 +48,7 @@ class WebAppCapture:
         self.count = 0
         self._socket: _TextSender | None = None
         self._pending: asyncio.Future[bytes] | None = None
+        self.camera_metadata: dict[str, Any] = {}
 
     @property
     def connected(self) -> bool:
@@ -63,6 +64,9 @@ class WebAppCapture:
     def on_frame(self, data: bytes) -> None:
         if self._pending is not None and not self._pending.done():
             self._pending.set_result(data)
+
+    def update_camera_metadata(self, metadata: dict[str, Any]) -> None:
+        self.camera_metadata = dict(metadata)
 
     async def capture(self) -> CaptureResult:
         if self._socket is None:

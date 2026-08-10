@@ -65,6 +65,7 @@ def build_coordinator(config: AppConfig, gallery: Gallery | None = None) -> Coor
             config.runtime.camera_fps,
             config.runtime.camera_width,
             config.runtime.camera_height,
+            config.runtime.camera_fourcc,
         )
     elif config.runtime.person_sensor == "fake":
         person_sensor = FakePersonSensor()

@@ -56,12 +56,50 @@ def create_app(coordinator: Coordinator) -> FastAPI:
             capture.bind(websocket)
             try:
                 while True:
-                    data = await websocket.receive_bytes()
-                    capture.on_frame(data)
+                    message = await websocket.receive()
+                    if message.get("type") == "websocket.disconnect":
+                        break
+                    if message.get("bytes") is not None:
+                        capture.on_frame(message["bytes"])
+                    elif message.get("text") is not None:
+                        try:
+                            metadata = json.loads(message["text"])
+                        except (TypeError, json.JSONDecodeError):
+                            continue
+                        if metadata.get("type") == "camera_metadata":
+                            capture.update_camera_metadata(metadata)
             except WebSocketDisconnect:
                 pass
             finally:
                 capture.unbind(websocket)
+
+        @app.get("/api/debug/phone-camera", include_in_schema=False)
+        async def debug_phone_camera() -> dict[str, object]:
+            return {
+                "connected": capture.connected,
+                "metadata": capture.camera_metadata,
+            }
+
+        @app.post("/api/debug/phone-snapshot", include_in_schema=False)
+        async def debug_phone_snapshot() -> dict[str, object]:
+            try:
+                result = await capture.capture()
+            except (RuntimeError, asyncio.TimeoutError) as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            if result.path is None:
+                raise HTTPException(status_code=500, detail="captured frame has no file")
+            from PIL import Image
+
+            with Image.open(result.path) as image:
+                width, height = image.size
+                orientation = image.getexif().get(274)
+            return {
+                "photo_url": result.photo_url,
+                "width": width,
+                "height": height,
+                "exif_orientation": orientation,
+                "metadata": capture.camera_metadata,
+            }
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
@@ -148,12 +186,31 @@ def create_app(coordinator: Coordinator) -> FastAPI:
     async def reset() -> dict[str, object]:
         return await emit(EventType.RESET_REQUESTED, {State.ERROR})
 
+    @app.post("/api/debug/person-approached", include_in_schema=False)
+    async def debug_person_approached() -> dict[str, object]:
+        # Forces waiting->greeting. 부스에 사람이 몰리면 지나가는 구경꾼도
+        # size_ratio 기준을 넘겨서 접근 판정이 손님을 특정하지 못한다.
+        return await emit(EventType.PERSON_APPROACHED, {State.WAITING})
+
     @app.post("/api/debug/position-reached", include_in_schema=False)
     async def debug_position_reached() -> dict[str, object]:
         # Forces guiding->capturing without waiting for the webcam to see
         # someone centered — handy for testing the countdown/burst UI without
-        # a person in front of the camera.
+        # a person in front of the camera. 현장에서는 이게 더 중요한데,
+        # 프레이밍 판정이 랜드마크 한 벌만 볼 때 동작하므로(coordinator._sense_loop)
+        # 뒤에 구경꾼이 한 명만 잡혀도 정위치가 영영 안 뜬다.
         return await emit(EventType.POSITION_REACHED, {State.GUIDING})
+
+    @app.post("/api/debug/ready-signal", include_in_schema=False)
+    async def debug_ready_signal() -> dict[str, object]:
+        # "손 들어 준비완료"를 운영자가 대신 눌러준다. 타임아웃(12초)을 기다리면
+        # 손님은 그냥 서 있는 시간이 되고, 그사이 팔이 언제 움직일지 모른다.
+        if not coordinator.force_ready():
+            raise HTTPException(
+                status_code=409,
+                detail="지금은 준비완료 신호를 기다리는 중이 아닙니다",
+            )
+        return coordinator.context.as_dict()
 
     @app.post("/api/debug/start-guide/{template_id}", include_in_schema=False)
     async def debug_start_guide(template_id: str) -> dict[str, object]:

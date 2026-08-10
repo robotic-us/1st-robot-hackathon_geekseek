@@ -336,6 +336,17 @@ class Coordinator:
             pass  # 손을 못 들었어도 계속 기다리게 하지 않고 진행 (fail-safe)
         self._patch(awaiting_ready=False)
 
+    def force_ready(self) -> bool:
+        """운영자가 "준비완료(손들기)" 인식을 대신 눌러준다.
+
+        관람객이 몰리면 손을 든 사람이 손님인지 구경꾼인지 구분이 안 되고,
+        그동안 손님은 ready_timeout_seconds(12초)를 멀뚱히 서서 기다린다.
+        지금 그 신호를 기다리는 중일 때만 먹는다."""
+        if not self.context.awaiting_ready:
+            return False
+        self._ready_event.set()
+        return True
+
     async def _capture_burst(self) -> None:
         await self._wait_until_ready()
 

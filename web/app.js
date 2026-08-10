@@ -76,6 +76,10 @@ function update(context) {
   if ($("#retake")) $("#retake").disabled = context.state !== "asking";
   if ($("#accept")) $("#accept").disabled = context.state !== "asking";
   if ($("#reset")) $("#reset").disabled = context.state !== "error";
+  // 인식 건너뛰기 — 각 버튼은 그 인식이 실제로 흐름을 막고 있는 동안에만 산다.
+  if ($("#skip-approach")) $("#skip-approach").disabled = context.state !== "waiting";
+  if ($("#skip-position")) $("#skip-position").disabled = context.state !== "guiding";
+  if ($("#skip-ready")) $("#skip-ready").disabled = !context.awaiting_ready;
   renderPhotos(photos);
 }
 
@@ -110,6 +114,9 @@ bind("#liked", "/api/liked");
 bind("#retake", "/api/replay");
 bind("#accept", "/api/liked");
 bind("#reset", "/api/reset");
+bind("#skip-approach", "/api/debug/person-approached");
+bind("#skip-position", "/api/debug/position-reached");
+bind("#skip-ready", "/api/debug/ready-signal");
 
 const events = new EventSource("/events");
 events.addEventListener("open", () => {

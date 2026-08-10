@@ -561,12 +561,18 @@
     context.photos.forEach((photoUrl, index) => {
       const shot = document.createElement("figure");
       shot.className = `saved-shot${index === 0 ? " active" : ""}`;
+      const backdrop = document.createElement("img");
+      backdrop.className = "shot-backdrop";
+      backdrop.src = photoUrl;
+      backdrop.alt = "";
+      backdrop.setAttribute("aria-hidden", "true");
       const image = document.createElement("img");
+      image.className = "shot-photo";
       image.src = photoUrl;
       image.alt = `촬영 결과 ${index + 1}`;
       const label = document.createElement("span");
       label.textContent = `PHOTO · ${String(index + 1).padStart(2, "0")}`;
-      shot.append(image, label);
+      shot.append(backdrop, image, label);
       frame.append(shot);
       const dot = document.createElement("i");
       dot.classList.toggle("active", index === 0);
@@ -594,7 +600,7 @@
       if (!count) return;
       slideIndex = (slideIndex + 1) % count;
       updateSlide();
-    }, 360);
+    }, 288);
   }
 
   function updateData(previous) {

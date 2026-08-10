@@ -118,5 +118,49 @@ class WebTests(unittest.TestCase):
         self.assertIn("framing_direction", state)
         self.assertIn("framing_positioned", state)
 
+    def test_debug_page_offers_a_skip_for_every_recognition_gate(self) -> None:
+        """사람이 몰리면 세 인식이 다 흔들린다. 운영자가 각각 넘길 수 있어야 한다."""
+        html = self.client.get("/debug").text
+        for button_id in ("skip-approach", "skip-position", "skip-ready"):
+            self.assertIn(f'id="{button_id}"', html)
+
+    def test_debug_script_wires_every_skip_button(self) -> None:
+        """버튼만 있고 핸들러가 없으면 눌러도 조용히 아무 일도 안 난다."""
+        script = self.client.get("/static/app.js").text
+        for selector, path in (
+            ("#skip-approach", "/api/debug/person-approached"),
+            ("#skip-position", "/api/debug/position-reached"),
+            ("#skip-ready", "/api/debug/ready-signal"),
+        ):
+            self.assertIn(f'bind("{selector}", "{path}")', script)
+
+    def test_skip_approach_advances_from_waiting(self) -> None:
+        self.assertEqual(self.client.post("/api/decline").status_code, 200)
+        self._wait_for("waiting")
+        self.assertEqual(self.client.post("/api/debug/person-approached").status_code, 200)
+        self._wait_for("deciding")
+
+    def test_skip_approach_rejected_outside_waiting(self) -> None:
+        self.assertEqual(self.client.post("/api/debug/person-approached").status_code, 409)
+
+    def test_skip_position_advances_from_guiding(self) -> None:
+        self._start_capture("full_body")
+        self.assertEqual(self.client.post("/api/debug/position-reached").status_code, 200)
+        self._wait_for("previewing")
+
+    def test_skip_position_rejected_outside_guiding(self) -> None:
+        self.assertEqual(self.client.post("/api/debug/position-reached").status_code, 409)
+
+    def test_skip_ready_rejected_when_nothing_is_waiting_on_it(self) -> None:
+        self.assertEqual(self.client.post("/api/debug/ready-signal").status_code, 409)
+
+    def test_skip_ready_releases_the_hand_raise_wait(self) -> None:
+        """실제 촬영에서는 person_sensor가 있어야 이 대기가 생긴다 — 그 상태를
+        직접 만들어 두고, 버튼이 12초 타임아웃을 실제로 끊는지 본다."""
+        self.coordinator.context.awaiting_ready = True
+        self.assertEqual(self.client.post("/api/debug/ready-signal").status_code, 200)
+        self.assertTrue(self.coordinator._ready_event.is_set())
+
+
 if __name__ == "__main__":
     unittest.main()
