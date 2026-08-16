@@ -36,6 +36,7 @@ class WebTests(unittest.TestCase):
     def test_pages_and_initial_state(self) -> None:
         self.assertEqual(self.client.get("/face").status_code, 200)
         self.assertEqual(self.client.get("/guide").status_code, 200)
+        self.assertEqual(self.client.get("/standby").status_code, 200)
         self.assertEqual(self.client.get("/debug").status_code, 200)
         self.assertEqual(self.client.get("/api/state").json()["state"], "deciding")
 
@@ -94,6 +95,30 @@ class WebTests(unittest.TestCase):
         self.assertIn("상반신샷", html)
         # 옛 단일 버튼이 남아 있으면 JS가 둘 중 하나만 연결한다.
         self.assertNotIn('id="start-capture"', html)
+
+    def test_standby_combines_face_and_guide_controls(self) -> None:
+        html = self.client.get("/standby").text
+        self.assertIn('data-page="standby"', html)
+        self.assertIn('id="face"', html)
+        self.assertIn('id="guide-stage"', html)
+        self.assertIn('data-template="full_body"', html)
+        self.assertIn('data-template="upper_body"', html)
+        self.assertIn("왼손을 1초 들어주세요", html)
+        self.assertIn("오른손을 1초 들어주세요", html)
+
+    def test_debug_hand_buttons_select_the_mapped_framing(self) -> None:
+        html = self.client.get("/debug").text
+        self.assertIn('id="gesture-left"', html)
+        self.assertIn('id="gesture-right"', html)
+        response = self.client.post("/api/debug/gesture-left")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["template_id"], "full_body")
+
+    def test_debug_keeps_ipad_links_and_adds_standby(self) -> None:
+        html = self.client.get("/debug").text
+        self.assertIn('href="/face"', html)
+        self.assertIn('href="/guide"', html)
+        self.assertIn('href="/standby"', html)
 
     def _start_capture(self, template: str) -> None:
         response = self.client.post("/api/capture-started", json={"template_id": template})

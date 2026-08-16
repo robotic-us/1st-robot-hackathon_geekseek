@@ -89,9 +89,12 @@ def build_template(
     samples: Iterable[Mapping[int, JointPoint]],
     *,
     min_joint_samples: int = 3,
+    radius_scale: float = 1.0,
 ) -> SilhouetteTemplate:
     if mode not in MODE_JOINTS:
         raise ValueError(f"지원하지 않는 촬영 모드입니다: {mode}")
+    if radius_scale <= 0:
+        raise ValueError("radius_scale은 0보다 커야 합니다")
     sample_list = list(samples)
     bands: dict[int, JointBand] = {}
     for index in MODE_JOINTS[mode]:
@@ -110,6 +113,8 @@ def build_template(
         elif mode == FULL_BODY:
             radius_x *= FULL_BODY_RADIUS_SCALE
             radius_y *= FULL_BODY_RADIUS_SCALE
+        radius_x *= radius_scale
+        radius_y *= radius_scale
         bands[index] = JointBand(center, radius_x, radius_y)
     return SilhouetteTemplate(mode=mode, joints=bands, sample_count=len(sample_list))
 
@@ -226,6 +231,54 @@ def load_templates_from_dataset(
             if all(index in points for index in MODE_JOINTS[mode]):
                 grouped[mode].append(points)
     return {mode: build_template(mode, samples) for mode, samples in grouped.items()}
+
+
+def load_templates_from_samples_csv(
+    csv_file: Path,
+    *,
+    radius_scale: float = 2.0,
+    min_visibility: float = 0.2,
+) -> dict[str, SilhouetteTemplate]:
+    """Build templates directly from the RBY1 framing-capture CSV.
+
+    The calibration tool already stored normalized shoulder/hip landmarks, so
+    loading them directly avoids re-running pose inference over the images.
+    ``radius_scale`` expands the learned p10-p90 joint bands after the existing
+    per-mode heuristics have been applied.
+    """
+    grouped: dict[str, list[dict[int, JointPoint]]] = {FULL_BODY: [], UPPER_BODY: []}
+    label_modes = {"full_body": FULL_BODY, "upper_body": UPPER_BODY}
+    joint_columns = {
+        11: "left_shoulder",
+        12: "right_shoulder",
+        23: "left_hip",
+        24: "right_hip",
+    }
+
+    with csv_file.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            mode = label_modes.get((row.get("label") or "").strip().lower())
+            if mode is None or int(row.get("people_count") or 0) != 1:
+                continue
+            points: dict[int, JointPoint] = {}
+            try:
+                for index, prefix in joint_columns.items():
+                    point = JointPoint(
+                        x=float(row[f"{prefix}_x"]),
+                        y=float(row[f"{prefix}_y"]),
+                        visibility=float(row[f"{prefix}_visibility"]),
+                    )
+                    if point.visibility >= min_visibility:
+                        points[index] = point
+            except (KeyError, TypeError, ValueError):
+                continue
+            if all(index in points for index in MODE_JOINTS[mode]):
+                grouped[mode].append(points)
+
+    return {
+        mode: build_template(mode, samples, radius_scale=radius_scale)
+        for mode, samples in grouped.items()
+    }
 
 
 def annotate_framing_frame(

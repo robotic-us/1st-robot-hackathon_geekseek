@@ -22,6 +22,9 @@ from .robot import Robot, burst_poses_for_template, pose_for_template
 from .vlm import Greeter
 from .workflow import Event, EventType, InvalidTransition, State, WorkflowContext, apply_event
 
+
+FRAMING_STABLE_REQUIRED = 2
+
 FrameSource = Callable[[], object | None]
 
 
@@ -39,6 +42,8 @@ class Coordinator:
         live_frame_interval: float = 1 / 15,
         greeting_seconds: float = 3.0,
         preview_seconds: float = 3.0,
+        asking_seconds: float = 30.0,
+        gesture_hold_seconds: float = 1.0,
         farewell_seconds: float = 4.0,
         countdown_seconds: float = 0.7,
         ready_timeout_seconds: float = 12.0,
@@ -57,6 +62,8 @@ class Coordinator:
         self.live_frame_interval = live_frame_interval
         self.greeting_seconds = greeting_seconds
         self.preview_seconds = preview_seconds
+        self.asking_seconds = asking_seconds
+        self.gesture_hold_seconds = gesture_hold_seconds
         self.farewell_seconds = farewell_seconds
         self.countdown_seconds = countdown_seconds
         self.ready_timeout_seconds = ready_timeout_seconds
@@ -66,6 +73,7 @@ class Coordinator:
         self.framing_templates = framing_templates or {}
         self.context.photo_target = photo_target_count
         self.debug_frame: bytes | None = None
+        self.rgb_frame: bytes | None = None
         self.live_frame: bytes | None = None
         self._last_signal = PersonSignal(detected=False)
         self._last_approaching = False
@@ -73,6 +81,13 @@ class Coordinator:
         self._last_framing_guidance = FramingGuidance(False, "사람을 기다리는 중")
         self._last_framing_points = {}
         self._framing_stable_frames = 0
+        self._teaching_guidance = {
+            mode: FramingGuidance(False, "모델을 카메라 앞에 세워주세요")
+            for mode in (FULL_BODY, UPPER_BODY)
+        }
+        self._teaching_points = {mode: {} for mode in (FULL_BODY, UPPER_BODY)}
+        self._teaching_stable_frames = {mode: 0 for mode in (FULL_BODY, UPPER_BODY)}
+        self._teaching_people_count = 0
         self._framing_debug_until = 0.0
         self.events: asyncio.Queue[Event | None] = asyncio.Queue()
         self._runner: asyncio.Task[None] | None = None
@@ -81,6 +96,10 @@ class Coordinator:
         self._effects: set[asyncio.Task[None]] = set()
         self._subscribers: set[asyncio.Queue[dict[str, object]]] = set()
         self._ready_event = asyncio.Event()
+        self._ready_neutral_seen = False
+        self._choice_gesture: str | None = None
+        self._choice_gesture_started_at: float | None = None
+        self._choice_gesture_locked = False
 
     async def start(self) -> None:
         if self._runner is not None:
@@ -168,6 +187,8 @@ class Coordinator:
                 self._spawn(self._capture_burst())
             elif self.context.state is State.PREVIEWING:
                 self._spawn(self._timer(EventType.PREVIEW_DONE, self._preview_seconds_for_photos()))
+            elif self.context.state is State.ASKING:
+                self._spawn(self._timer(EventType.PHOTO_LIKED, self.asking_seconds))
             elif self.context.state is State.FAREWELL:
                 self._spawn(self._timer(EventType.FAREWELL_DONE, self.farewell_seconds))
 
@@ -216,6 +237,7 @@ class Coordinator:
             signal: PersonSignal = self.person_sensor.sense(frame)
             approaching = is_approaching(signal)
             positioned = is_positioned(signal)
+            self._update_teaching_framing(signal)
             mode = self._selected_framing_mode()
             debug_override = asyncio.get_running_loop().time() < self._framing_debug_until
             if self.context.state is State.GUIDING and debug_override:
@@ -229,7 +251,7 @@ class Coordinator:
                 self._framing_stable_frames = (
                     self._framing_stable_frames + 1 if guidance.positioned else 0
                 )
-                positioned = self._framing_stable_frames >= 5
+                positioned = self._framing_stable_frames >= FRAMING_STABLE_REQUIRED
                 message = guidance.message
                 if guidance.positioned and not positioned:
                     message = "잠시 그대로 서 주세요"
@@ -243,14 +265,59 @@ class Coordinator:
             self._last_positioned = positioned
             if self.context.state is State.WAITING and approaching:
                 await self.emit(EventType.PERSON_APPROACHED)
+            elif self.context.state is State.DECIDING:
+                await self._handle_choice_gesture(signal)
             elif self.context.state is State.GUIDING and positioned:
                 await self.emit(EventType.POSITION_REACHED)
             elif (
                 self.context.state is State.CAPTURING
                 and self.context.awaiting_ready
-                and is_ready_signal(signal)
             ):
-                self._ready_event.set()
+                # The hand used for framing selection must be lowered once
+                # before a new raise can arm physical motion.  Otherwise one
+                # continuous hold can both select a mode and start the robot.
+                if not signal.hand_raised:
+                    self._ready_neutral_seen = True
+                elif self._ready_neutral_seen and is_ready_signal(signal):
+                    self._ready_event.set()
+
+            if self.context.state is not State.DECIDING:
+                self._choice_gesture = None
+                self._choice_gesture_started_at = None
+                self._choice_gesture_locked = False
+
+    async def _handle_choice_gesture(self, signal: PersonSignal) -> None:
+        """One guest holds one hand for a second to choose the framing mode."""
+        choice: str | None = None
+        if signal.detected and signal.people_count == 1:
+            if signal.left_hand_raised and not signal.right_hand_raised:
+                choice = "full_body"
+            elif signal.right_hand_raised and not signal.left_hand_raised:
+                choice = "upper_body"
+
+        if choice is None:
+            self._choice_gesture = None
+            self._choice_gesture_started_at = None
+            self._choice_gesture_locked = False
+            if self.context.gesture_choice or self.context.gesture_progress:
+                self._patch(gesture_choice="", gesture_progress=0.0)
+            return
+
+        now = asyncio.get_running_loop().time()
+        if choice != self._choice_gesture:
+            self._choice_gesture = choice
+            self._choice_gesture_started_at = now
+            self._choice_gesture_locked = False
+            self._patch(gesture_choice=choice, gesture_progress=0.0)
+            return
+
+        if self._choice_gesture_locked or self._choice_gesture_started_at is None:
+            return
+        progress = min(1.0, (now - self._choice_gesture_started_at) / max(self.gesture_hold_seconds, 0.01))
+        self._patch(gesture_choice=choice, gesture_progress=round(progress, 2))
+        if progress >= 1.0:
+            self._choice_gesture_locked = True
+            await self.emit(EventType.CAPTURE_STARTED, template_id=choice)
 
     async def _frame_loop(self) -> None:
         """Refreshes the guest-facing live/debug camera preview at the
@@ -266,6 +333,7 @@ class Coordinator:
             frame = self.frame_source()
             if frame is None:
                 continue
+            self.rgb_frame = encode_jpeg(frame)
             if hasattr(self.person_sensor, "annotate_jpeg"):
                 self.debug_frame = self.person_sensor.annotate_jpeg(
                     frame, self._last_signal, self._last_approaching, self._last_positioned
@@ -287,6 +355,124 @@ class Coordinator:
             "full_body": FULL_BODY,
             "upper_body": UPPER_BODY,
         }.get(self.context.template_id or "")
+
+    @staticmethod
+    def _mode_for_template(template_id: str) -> str | None:
+        return {"full_body": FULL_BODY, "upper_body": UPPER_BODY}.get(template_id)
+
+    def _update_teaching_framing(self, signal: PersonSignal) -> None:
+        """Evaluate both recorder compositions without changing workflow state."""
+        landmarks_list = getattr(self.person_sensor, "latest_landmarks", ())
+        self._teaching_people_count = len(landmarks_list)
+        for mode in (FULL_BODY, UPPER_BODY):
+            template = self.framing_templates.get(mode)
+            points = {}
+            if signal.detected and len(landmarks_list) == 1:
+                points = visible_points(landmarks_list[0], 0.2)
+            if len(landmarks_list) > 1:
+                guidance = FramingGuidance(False, "한 명만 촬영 위치에 서 주세요")
+            elif template is None:
+                guidance = self._fallback_teaching_guidance(signal)
+            else:
+                guidance = evaluate_framing(template, points)
+            self._teaching_points[mode] = points
+            self._teaching_guidance[mode] = guidance
+            self._teaching_stable_frames[mode] = (
+                self._teaching_stable_frames[mode] + 1 if guidance.positioned else 0
+            )
+
+    @staticmethod
+    def _fallback_teaching_guidance(signal: PersonSignal) -> FramingGuidance:
+        """Center/size guide used until a site-specific silhouette is recorded."""
+        if not signal.detected:
+            return FramingGuidance(False, "모델을 RGB 카메라 앞에 세워주세요")
+        target_size = 0.18
+        scale_ratio = (max(signal.size_ratio, 1e-6) / target_size) ** 0.5
+        center_error_x = signal.center_x - 0.5
+        if signal.size_ratio < 0.12:
+            message, direction = "앞으로 이동하세요", "forward"
+        elif signal.size_ratio > 0.28:
+            message, direction = "뒤로 이동하세요", "back"
+        elif center_error_x < -0.10:
+            message, direction = "화면 오른쪽으로 이동하세요", "right"
+        elif center_error_x > 0.10:
+            message, direction = "화면 왼쪽으로 이동하세요", "left"
+        elif not 0.28 <= signal.center_y <= 0.82:
+            message, direction = "카메라 중앙 표시 안으로 이동하세요", "align"
+        else:
+            message, direction = "좋습니다 · 그대로 서 주세요", "hold"
+        return FramingGuidance(
+            detected=True,
+            message=message,
+            direction=direction,
+            scale_ratio=scale_ratio,
+            center_error_x=center_error_x,
+            inside_count=1 if direction == "hold" else 0,
+            required_count=1,
+            positioned=direction == "hold",
+        )
+
+    def teaching_framing_snapshot(self, template_id: str) -> dict[str, object]:
+        mode = self._mode_for_template(template_id)
+        if mode is None:
+            raise ValueError(f"지원하지 않는 촬영 모드입니다: {template_id}")
+        guidance = self._teaching_guidance[mode]
+        stable_frames = self._teaching_stable_frames[mode]
+        landmarks = [
+            {
+                "index": index,
+                "x": round(point.x, 6),
+                "y": round(point.y, 6),
+                "visibility": round(point.visibility, 6),
+            }
+            for index, point in sorted(self._teaching_points[mode].items())
+        ]
+        return {
+            "template_id": template_id,
+            "available": self.person_sensor is not None,
+            "algorithm": "silhouette" if mode in self.framing_templates else "center_size",
+            "detected": guidance.detected,
+            "people_count": self._teaching_people_count,
+            "message": guidance.message if stable_frames < FRAMING_STABLE_REQUIRED else "좋습니다 · 그대로 서 주세요",
+            "direction": guidance.direction,
+            "scale_ratio": round(guidance.scale_ratio, 3),
+            "center_error_x": round(guidance.center_error_x, 3),
+            "inside_count": guidance.inside_count,
+            "required_count": guidance.required_count,
+            "raw_positioned": guidance.positioned,
+            "stable_frames": min(stable_frames, FRAMING_STABLE_REQUIRED),
+            "stable_required": FRAMING_STABLE_REQUIRED,
+            "positioned": stable_frames >= FRAMING_STABLE_REQUIRED,
+            "landmarks": landmarks,
+        }
+
+    def teaching_framing_jpeg(self, template_id: str) -> bytes | None:
+        mode = self._mode_for_template(template_id)
+        if mode is None:
+            raise ValueError(f"지원하지 않는 촬영 모드입니다: {template_id}")
+        if self.frame_source is None or self.person_sensor is None:
+            return None
+        frame = self.frame_source()
+        if frame is None:
+            return None
+        template = self.framing_templates.get(mode)
+        if template is not None:
+            frame = annotate_framing_frame(
+                frame,
+                template,
+                self._teaching_points[mode],
+                self._teaching_guidance[mode],
+            )
+        elif hasattr(self.person_sensor, "annotate_jpeg"):
+            return self.person_sensor.annotate_jpeg(
+                frame,
+                self._last_signal,
+                self._last_approaching,
+                self._teaching_stable_frames[mode] >= FRAMING_STABLE_REQUIRED,
+            )
+        if hasattr(self.person_sensor, "mirror_jpeg"):
+            return self.person_sensor.mirror_jpeg(frame)
+        return encode_jpeg(frame)
 
     def _patch_framing(
         self,
@@ -329,6 +515,7 @@ class Coordinator:
         if self.person_sensor is None:
             return
         self._ready_event.clear()
+        self._ready_neutral_seen = False
         self._patch(awaiting_ready=True)
         try:
             await asyncio.wait_for(self._ready_event.wait(), self.ready_timeout_seconds)
@@ -348,6 +535,12 @@ class Coordinator:
         return True
 
     async def _capture_burst(self) -> None:
+        # A WebAppCapture failure is otherwise discovered only at the first
+        # dwell, after the physical arm has already moved.  Refuse the run
+        # before ready/countdown whenever the phone WebSocket is absent.
+        if hasattr(self.capture, "connected") and not self.capture.connected:
+            await self.emit(EventType.CAPTURE_FAILED, reason="iPhone camera is not connected")
+            return
         await self._wait_until_ready()
 
         for remaining in (3, 2, 1):

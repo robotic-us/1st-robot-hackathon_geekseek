@@ -113,6 +113,11 @@ def create_app(coordinator: Coordinator) -> FastAPI:
     async def guide() -> FileResponse:
         return FileResponse(WEB_ROOT / "guide-mock.html")
 
+    @app.get("/standby", include_in_schema=False)
+    async def standby() -> FileResponse:
+        """Single portrait display used by the RB-Y1 installation."""
+        return FileResponse(WEB_ROOT / "standby.html")
+
     @app.get("/debug", include_in_schema=False)
     async def debug() -> FileResponse:
         return FileResponse(WEB_ROOT / "debug.html")
@@ -137,6 +142,37 @@ def create_app(coordinator: Coordinator) -> FastAPI:
         @app.get("/debug/webcam", include_in_schema=False)
         async def debug_webcam() -> StreamingResponse:
             return _mjpeg_stream(lambda: coordinator.debug_frame)
+
+        @app.get("/api/debug/rgb-frame", include_in_schema=False)
+        async def rgb_frame() -> Response:
+            if not coordinator.rgb_frame:
+                raise HTTPException(status_code=503, detail="RGB 프레임을 기다리는 중입니다")
+            return Response(
+                coordinator.rgb_frame,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
+
+        @app.get("/api/debug/teaching-framing/{template_id}", include_in_schema=False)
+        async def teaching_framing(template_id: str) -> dict[str, object]:
+            try:
+                return coordinator.teaching_framing_snapshot(template_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.get("/api/debug/teaching-framing-frame/{template_id}", include_in_schema=False)
+        async def teaching_framing_frame(template_id: str) -> Response:
+            try:
+                image = coordinator.teaching_framing_jpeg(template_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if not image:
+                raise HTTPException(status_code=503, detail="skeleton 프레임을 기다리는 중입니다")
+            return Response(
+                image,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
 
     if coordinator.person_sensor is not None and hasattr(coordinator.person_sensor, "mirror_jpeg"):
 
@@ -211,6 +247,24 @@ def create_app(coordinator: Coordinator) -> FastAPI:
                 detail="지금은 준비완료 신호를 기다리는 중이 아닙니다",
             )
         return coordinator.context.as_dict()
+
+    @app.post("/api/debug/gesture-left", include_in_schema=False)
+    async def debug_gesture_left() -> dict[str, object]:
+        """Simulate the completed left-hand hold: full-body framing."""
+        return await emit(
+            EventType.CAPTURE_STARTED,
+            {State.DECIDING},
+            template_id="full_body",
+        )
+
+    @app.post("/api/debug/gesture-right", include_in_schema=False)
+    async def debug_gesture_right() -> dict[str, object]:
+        """Simulate the completed right-hand hold: upper-body framing."""
+        return await emit(
+            EventType.CAPTURE_STARTED,
+            {State.DECIDING},
+            template_id="upper_body",
+        )
 
     @app.post("/api/debug/start-guide/{template_id}", include_in_schema=False)
     async def debug_start_guide(template_id: str) -> dict[str, object]:

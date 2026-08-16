@@ -80,6 +80,8 @@ function update(context) {
   if ($("#skip-approach")) $("#skip-approach").disabled = context.state !== "waiting";
   if ($("#skip-position")) $("#skip-position").disabled = context.state !== "guiding";
   if ($("#skip-ready")) $("#skip-ready").disabled = !context.awaiting_ready;
+  if ($("#gesture-left")) $("#gesture-left").disabled = context.state !== "deciding";
+  if ($("#gesture-right")) $("#gesture-right").disabled = context.state !== "deciding";
   renderPhotos(photos);
 }
 
@@ -117,6 +119,8 @@ bind("#reset", "/api/reset");
 bind("#skip-approach", "/api/debug/person-approached");
 bind("#skip-position", "/api/debug/position-reached");
 bind("#skip-ready", "/api/debug/ready-signal");
+bind("#gesture-left", "/api/debug/gesture-left");
+bind("#gesture-right", "/api/debug/gesture-right");
 
 const events = new EventSource("/events");
 events.addEventListener("open", () => {

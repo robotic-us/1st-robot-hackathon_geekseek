@@ -58,6 +58,8 @@ class WorkflowContext:
     framing_inside: int = 0
     framing_required: int = 0
     framing_positioned: bool = False
+    gesture_choice: str = ""
+    gesture_progress: float = 0.0
     revision: int = 0
 
     def as_dict(self) -> dict[str, Any]:
@@ -107,6 +109,8 @@ def apply_event(context: WorkflowContext, event: Event) -> None:
         context.framing_inside = 0
         context.framing_required = 0
         context.framing_positioned = False
+        context.gesture_choice = ""
+        context.gesture_progress = 0.0
     elif event.type is EventType.BURST_COMPLETE:
         context.photos = list(event.data.get("photos", []))
     elif event.type is EventType.CAPTURE_FAILED:
@@ -126,6 +130,8 @@ def apply_event(context: WorkflowContext, event: Event) -> None:
         context.framing_inside = 0
         context.framing_required = 0
         context.framing_positioned = False
+        context.gesture_choice = ""
+        context.gesture_progress = 0.0
 
     context.state = next_state
     context.revision += 1

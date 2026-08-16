@@ -16,10 +16,13 @@ PERFORMANCE_LOGGER = logging.getLogger("uvicorn.error")
 @dataclass(frozen=True)
 class PersonSignal:
     detected: bool
+    people_count: int = 0
     size_ratio: float = 0.0  # visible-landmark bbox area / frame area, 0..1
     center_x: float = 0.5  # normalized 0..1, bbox center
     center_y: float = 0.5
     hand_raised: bool = False  # 손목이 어깨보다 위에 있는 사람이 한 명이라도 있으면 True
+    left_hand_raised: bool = False
+    right_hand_raised: bool = False
 
 
 class PersonSensor(Protocol):
@@ -31,18 +34,28 @@ _LEFT_SHOULDER, _RIGHT_SHOULDER = 11, 12
 _LEFT_WRIST, _RIGHT_WRIST = 15, 16
 
 
-def _any_hand_raised(landmarks_list: list, min_visibility: float, margin: float = 0.05) -> bool:
-    """True if, for any detected person, a wrist sits clearly above (smaller
-    y than) its shoulder — the "hand up, I'm ready" signal before the burst
-    countdown starts."""
+def _raised_hands(landmarks_list: list, min_visibility: float, margin: float = 0.05) -> tuple[bool, bool]:
+    """Return whether an anatomical left/right wrist is above its shoulder."""
+    left_raised = False
+    right_raised = False
     for landmarks in landmarks_list:
-        for shoulder_index, wrist_index in ((_LEFT_SHOULDER, _LEFT_WRIST), (_RIGHT_SHOULDER, _RIGHT_WRIST)):
+        for side, shoulder_index, wrist_index in (
+            ("left", _LEFT_SHOULDER, _LEFT_WRIST),
+            ("right", _RIGHT_SHOULDER, _RIGHT_WRIST),
+        ):
             shoulder, wrist = landmarks[shoulder_index], landmarks[wrist_index]
             if shoulder.visibility < min_visibility or wrist.visibility < min_visibility:
                 continue
             if wrist.y < shoulder.y - margin:
-                return True
-    return False
+                if side == "left":
+                    left_raised = True
+                else:
+                    right_raised = True
+    return left_raised, right_raised
+
+
+def _any_hand_raised(landmarks_list: list, min_visibility: float, margin: float = 0.05) -> bool:
+    return any(_raised_hands(landmarks_list, min_visibility, margin))
 
 
 def create_pose_landmarker(
@@ -133,7 +146,9 @@ class MediaPipePersonSensor:
             instant_loop_fps = 1.0 / max(started - self._last_sense_at, 1e-6)
             self.loop_fps = instant_loop_fps if self.loop_fps == 0.0 else self.loop_fps * 0.9 + instant_loop_fps * 0.1
         self._last_sense_at = started
-        rgb = frame[:, :, ::-1]  # cv2 gives BGR; mediapipe wants RGB
+        # Channel reversal produces a negative-stride NumPy view. MediaPipe's
+        # ARM pybind accepts only contiguous image buffers, so materialize it.
+        rgb = frame[:, :, ::-1].copy()  # cv2 gives BGR; mediapipe wants RGB
         mp_image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         result = self._landmarker.detect(mp_image)
         instant_inference_fps = 1.0 / max(time.perf_counter() - started, 1e-6)
@@ -152,7 +167,7 @@ class MediaPipePersonSensor:
             self._next_performance_log = started + 5.0
         if not result.pose_landmarks:
             self._last_landmarks_list = []
-            return PersonSignal(detected=False)
+            return PersonSignal(detected=False, people_count=len(result.pose_landmarks))
 
         self._last_landmarks_list = list(result.pose_landmarks)
 
@@ -175,12 +190,18 @@ class MediaPipePersonSensor:
 
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
+        left_hand_raised, right_hand_raised = _raised_hands(
+            result.pose_landmarks, self._min_landmark_visibility
+        )
         return PersonSignal(
             detected=True,
+            people_count=len(result.pose_landmarks),
             size_ratio=max(0.0, max_x - min_x) * max(0.0, max_y - min_y),
             center_x=(min_x + max_x) / 2,
             center_y=(min_y + max_y) / 2,
-            hand_raised=_any_hand_raised(result.pose_landmarks, self._min_landmark_visibility),
+            hand_raised=left_hand_raised or right_hand_raised,
+            left_hand_raised=left_hand_raised,
+            right_hand_raised=right_hand_raised,
         )
 
     @property
@@ -222,6 +243,7 @@ class MediaPipePersonSensor:
             f"loop={self.loop_fps:.1f}fps  inference={self.inference_fps:.1f}fps",
             f"size_ratio={signal.size_ratio:.3f}  center=({signal.center_x:.2f}, {signal.center_y:.2f})",
             f"approaching={approaching}  positioned={positioned}",
+            f"hands: left={signal.left_hand_raised}  right={signal.right_hand_raised}",
         ]
         for index, line in enumerate(lines):
             y = 28 + index * 26
@@ -261,6 +283,7 @@ class WebcamFrameSource:
         frame_width: int = 1280,
         frame_height: int = 960,
         fourcc: str = "MJPG",
+        device_fps: float | None = None,
     ) -> None:
         import cv2
 
@@ -275,7 +298,7 @@ class WebcamFrameSource:
         self._capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
         self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
         self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
-        self._capture.set(cv2.CAP_PROP_FPS, target_fps)
+        self._capture.set(cv2.CAP_PROP_FPS, device_fps or target_fps)
         self._latest: object | None = None
         self._running = True
         self._frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0

@@ -23,6 +23,9 @@ dependencies = [
 cad = [
   "cadquery>=2.8,<3",
 ]
+rby1 = [
+  "rby1-sdk>=0.10,<0.11",
+]
 dev = [
   "pytest>=8.0,<9",
 ]

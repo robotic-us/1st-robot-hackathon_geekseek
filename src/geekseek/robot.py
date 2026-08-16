@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import math
 import sys
 import threading
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
 from .motion_plan import ShotCue, SweepPlan, load_sweep_plan, plan_shot_times
+from .rby1_keyposes import SCHEMA as RBY1_KEYPOSE_SCHEMA, compile_keyposes
 
 ShotCallback = Callable[[ShotCue], Awaitable[None]]
 
@@ -152,6 +156,386 @@ class RvizRobot(FakeRobot):
         if self._rclpy.ok():
             self._rclpy.shutdown()
         self._spin_thread.join(timeout=1.0)
+
+
+@dataclass(frozen=True)
+class Rby1Segment:
+    """One right-arm target in an RB-Y1 camera sweep.
+
+    The values are deliberately RB-Y1 joint angles in radians, rather than a
+    conversion of the old Phorce values.  The two arms have different
+    kinematics, so copying Phorce joint values would not preserve the camera
+    path (and could violate a joint limit).
+    """
+
+    kind: str
+    duration_s: float
+    right_arm_rad: tuple[float, ...] | None = None
+    head_rad: tuple[float, float] | None = None
+    ee_right_transform: tuple[tuple[float, ...], ...] | None = None
+    label: str = ""
+    shot_ratios: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class Rby1Trajectory:
+    name: str
+    segments: tuple[Rby1Segment, ...]
+
+    def sweep_plan(self) -> SweepPlan:
+        elapsed = 0.0
+        windows: list[tuple[str, float, float]] = []
+        for index, segment in enumerate(self.segments, start=1):
+            end = elapsed + segment.duration_s
+            if segment.kind == "dwell":
+                windows.append((segment.label or f"wp{index}", elapsed, end))
+            elapsed = end
+        return SweepPlan(slot=0, name=self.name, total_seconds=elapsed, windows=windows)
+
+
+def load_rby1_trajectory(path: Path, target_count: int | None = None) -> Rby1Trajectory:
+    """Load a deliberately small, reviewable RB-Y1 right-arm trajectory.
+
+    ``scripts/build_rby1_trajectory.py`` creates this file from the original
+    photo-sweep timing.  A calibrated 7-DoF target must be provided for every
+    segment before the file can be executed on hardware.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw.get("schema") == RBY1_KEYPOSE_SCHEMA:
+            raw = compile_keyposes(raw, target_count)
+        segments = tuple(
+            Rby1Segment(
+                kind=str(item["kind"]),
+                duration_s=float(item["duration_s"]),
+                right_arm_rad=(
+                    tuple(float(value) for value in item["right_arm_rad"])
+                    if "right_arm_rad" in item
+                    else None
+                ),
+                head_rad=(
+                    tuple(float(value) for value in item["head_rad"])
+                    if "head_rad" in item
+                    else None
+                ),
+                ee_right_transform=(
+                    tuple(tuple(float(value) for value in row) for row in item["ee_right_transform"])
+                    if "ee_right_transform" in item
+                    else None
+                ),
+                label=str(item.get("label", "")),
+                shot_ratios=tuple(float(value) for value in item.get("shot_ratios", ())),
+            )
+            for item in raw["segments"]
+        )
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"RB-Y1 trajectory를 읽을 수 없습니다: {path}: {exc}") from exc
+
+    if not segments:
+        raise RuntimeError(f"RB-Y1 trajectory에 구간이 없습니다: {path}")
+    for index, segment in enumerate(segments, start=1):
+        if segment.kind not in {"entry", "travel", "dwell", "home"}:
+            raise RuntimeError(f"RB-Y1 trajectory {path}의 {index}번 구간 kind가 올바르지 않습니다")
+        if segment.duration_s <= 0:
+            raise RuntimeError(f"RB-Y1 trajectory {path}의 {index}번 구간 시간이 0 이하여서는 안 됩니다")
+        if (segment.right_arm_rad is None) == (segment.ee_right_transform is None):
+            raise RuntimeError(
+                f"RB-Y1 trajectory {path}의 {index}번 구간에는 right_arm_rad 또는 "
+                "ee_right_transform 중 하나만 필요합니다"
+            )
+        if segment.right_arm_rad is not None and len(segment.right_arm_rad) != 7:
+            raise RuntimeError(f"RB-Y1 trajectory {path}의 {index}번 구간은 오른팔 7축 값이 필요합니다")
+        if segment.head_rad is not None and len(segment.head_rad) != 2:
+            raise RuntimeError(f"RB-Y1 trajectory {path}의 {index}번 구간은 목 2축 값이 필요합니다")
+        if segment.ee_right_transform is not None and (
+            len(segment.ee_right_transform) != 4 or any(len(row) != 4 for row in segment.ee_right_transform)
+        ):
+            raise RuntimeError(f"RB-Y1 trajectory {path}의 {index}번 구간은 4x4 ee_right_transform이 필요합니다")
+        if any(not 0.0 < ratio < 1.0 for ratio in segment.shot_ratios):
+            raise RuntimeError(f"RB-Y1 trajectory {path}의 {index}번 이동 촬영 비율은 0과 1 사이여야 합니다")
+        if tuple(sorted(segment.shot_ratios)) != segment.shot_ratios:
+            raise RuntimeError(f"RB-Y1 trajectory {path}의 {index}번 이동 촬영 비율은 오름차순이어야 합니다")
+    return Rby1Trajectory(name=str(raw.get("name", path.stem)), segments=segments)
+
+
+class Rby1Robot:
+    """RB-Y1 SDK adapter for GeekSeek's precomputed photo sweeps.
+
+    This uses RB-Y1's non-realtime right-arm joint-position command stream.
+    It intentionally refuses to power on or enable servos itself: those are
+    physical, operator-confirmed steps in the RB-Y1 Web UI / bring-up flow.
+    """
+
+    def __init__(
+        self,
+        trajectories: dict[str, Path],
+        address: str,
+        model: str = "a",
+        command_priority: int = 1,
+        speed_ratio: float | None = None,
+        acceleration_ratio: float = 0.5,
+        min_travel_seconds: float = 0.25,
+        moving_shot_interval: float = 0.35,
+    ) -> None:
+        if speed_ratio is not None and not 0 < speed_ratio <= 0.70:
+            raise ValueError("rby1_speed_ratio는 0보다 크고 0.70 이하여야 합니다")
+        if not 0 < acceleration_ratio <= 1.0:
+            raise ValueError("rby1_acceleration_ratio는 0보다 크고 1 이하여야 합니다")
+        if min_travel_seconds <= 0:
+            raise ValueError("rby1_min_travel_seconds는 0보다 커야 합니다")
+        if moving_shot_interval <= 0:
+            raise ValueError("rby1_moving_shot_interval은 0보다 커야 합니다")
+        self.trajectories = {name: Path(path) for name, path in trajectories.items()}
+        self.address = address
+        self.model = model
+        self.command_priority = command_priority
+        self.speed_ratio = speed_ratio
+        self.acceleration_ratio = acceleration_ratio
+        self.min_travel_seconds = min_travel_seconds
+        self.moving_shot_interval = moving_shot_interval
+        self.moves: list[str] = []
+        self._sdk: object | None = None
+        self._robot: object | None = None
+        self._connect_lock = asyncio.Lock()
+        self._joint_velocity_limits: tuple[float, ...] | None = None
+        self._joint_acceleration_limits: tuple[float, ...] | None = None
+
+    @staticmethod
+    def _minimum_motion_time(
+        start: tuple[float, ...],
+        target: tuple[float, ...],
+        velocity_limits: tuple[float, ...],
+        acceleration_limits: tuple[float, ...],
+    ) -> float:
+        """Minimum synchronized time under per-axis trapezoidal limits."""
+        durations = []
+        for current, goal, velocity, acceleration in zip(
+            start, target, velocity_limits, acceleration_limits
+        ):
+            distance = abs(goal - current)
+            ramp_distance = velocity * velocity / acceleration
+            if distance <= ramp_distance:
+                durations.append(2.0 * math.sqrt(distance / acceleration))
+            else:
+                durations.append(distance / velocity + velocity / acceleration)
+        return max(durations, default=0.0)
+
+    def _retime_trajectory(self, trajectory: Rby1Trajectory) -> Rby1Trajectory:
+        if (
+            self._robot is None
+            or self._joint_velocity_limits is None
+            or self._joint_acceleration_limits is None
+        ):
+            return trajectory
+        model = self._robot.model()
+        state = self._robot.get_state()
+        previous = tuple(float(state.position[index]) for index in model.right_arm_idx)
+        output: list[Rby1Segment] = []
+        for segment in trajectory.segments:
+            target = segment.right_arm_rad
+            if target is None or segment.kind == "dwell":
+                output.append(segment)
+            else:
+                duration = self._minimum_motion_time(
+                    previous,
+                    target,
+                    self._joint_velocity_limits,
+                    self._joint_acceleration_limits,
+                )
+                # Small margin absorbs controller/RPC scheduling variation so
+                # dwell windows remain aligned with actual arrival.
+                capture_floor = (
+                    (len(segment.shot_ratios) + 1) * self.moving_shot_interval
+                    if segment.shot_ratios
+                    else 0.0
+                )
+                output.append(
+                    replace(
+                        segment,
+                        duration_s=max(self.min_travel_seconds, duration * 1.10, capture_floor),
+                    )
+                )
+            if target is not None:
+                previous = target
+        return Rby1Trajectory(name=trajectory.name, segments=tuple(output))
+
+    def trajectory_for(self, pose: str, target_count: int | None = None) -> Rby1Trajectory:
+        try:
+            path = self.trajectories[pose]
+        except KeyError as exc:
+            raise RuntimeError(f"{pose}에 대응하는 RB-Y1 trajectory가 없습니다") from exc
+        try:
+            schema = json.loads(path.read_text(encoding="utf-8")).get("schema")
+        except (OSError, AttributeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"RB-Y1 keypose 파일을 읽을 수 없습니다: {path}: {exc}") from exc
+        if schema != RBY1_KEYPOSE_SCHEMA:
+            raise RuntimeError(
+                f"RB-Y1 실기에서는 연속 녹화 trajectory를 실행하지 않습니다: {path}. "
+                "휴대폰을 그리퍼로 고정한 뒤 record_rby1_right_arm.py로 11개 keypose를 다시 기록하세요"
+            )
+        return self._retime_trajectory(load_rby1_trajectory(path, target_count))
+
+    def _connect_and_verify(self) -> None:
+        try:
+            import rby1_sdk as rby
+        except ImportError as exc:
+            raise RuntimeError("RB-Y1 실행에는 `pip install -e '.[rby1]'`가 필요합니다") from exc
+        robot = rby.create_robot(self.address, self.model)
+        if not robot.connect():
+            raise RuntimeError(f"RB-Y1에 연결하지 못했습니다: {self.address}")
+        state = robot.get_control_manager_state().state
+        enabled = rby.ControlManagerState.State.Enabled
+        if state != enabled:
+            raise RuntimeError(
+                "RB-Y1 Control Manager가 ENABLE 상태가 아닙니다. "
+                "Web UI에서 주변 안전을 확인한 뒤 전원·서보·Control Manager를 준비하세요."
+            )
+        if self.speed_ratio is not None:
+            model = robot.model()
+            dynamics = robot.get_dynamics()
+            dynamics_state = dynamics.make_state([], model.robot_joint_names)
+            self._joint_velocity_limits = tuple(
+                float(value) * self.speed_ratio
+                for value in dynamics.get_limit_qdot_upper(dynamics_state)[model.right_arm_idx]
+            )
+            self._joint_acceleration_limits = tuple(
+                float(value) * self.acceleration_ratio
+                for value in dynamics.get_limit_qddot_upper(dynamics_state)[model.right_arm_idx]
+            )
+        self._sdk = rby
+        self._robot = robot
+
+    async def preflight(self) -> None:
+        async with self._connect_lock:
+            if self._robot is None:
+                await asyncio.to_thread(self._connect_and_verify)
+
+    def _send_segment(self, segment: Rby1Segment) -> None:
+        if self._robot is None or self._sdk is None:
+            raise RuntimeError("RB-Y1이 연결되지 않았습니다")
+        rby = self._sdk
+        if segment.ee_right_transform is not None:
+            # Cartesian positions are recorded in the robot's `base` frame
+            # through SDK FK while the torso/base remain fixed during teleop.
+            # Conservative limits keep replay below the generic SDK examples.
+            arm_command = (
+                rby.CartesianCommandBuilder()
+                .add_target(
+                    "base",
+                    "ee_right",
+                    [list(row) for row in segment.ee_right_transform],
+                    0.20,
+                    0.50,
+                    0.30,
+                )
+                .set_minimum_time(segment.duration_s)
+                .set_stop_position_tracking_error(0.003)
+                .set_stop_orientation_tracking_error(0.03)
+            )
+        else:
+            arm_command = (
+                rby.JointPositionCommandBuilder()
+                .set_minimum_time(segment.duration_s)
+                .set_position(list(segment.right_arm_rad or ()))
+            )
+            if self._joint_velocity_limits is not None:
+                arm_command.set_velocity_limit(list(self._joint_velocity_limits))
+            if self._joint_acceleration_limits is not None:
+                arm_command.set_acceleration_limit(list(self._joint_acceleration_limits))
+        component = rby.ComponentBasedCommandBuilder().set_body_command(
+            rby.BodyComponentBasedCommandBuilder().set_right_arm_command(arm_command)
+        )
+        if segment.head_rad is not None:
+            component.set_head_command(
+                rby.JointPositionCommandBuilder()
+                .set_minimum_time(segment.duration_s)
+                .set_position(list(segment.head_rad))
+            )
+        command = rby.RobotCommandBuilder().set_command(component)
+        feedback = self._robot.send_command(command, self.command_priority).get()
+        if feedback.finish_code != rby.RobotCommandFeedback.FinishCode.Ok:
+            raise RuntimeError(f"RB-Y1 {segment.label or segment.kind} 실행 실패: {feedback.finish_code}")
+
+    async def _execute(self, trajectory: Rby1Trajectory) -> None:
+        # Compiled keyposes are sparse, intentional moves and capture dwells.
+        # Waiting for each SDK result makes arrival and the final base return
+        # explicit; canceling a command stream can race with the next command
+        # at the same priority and leave the arm at the last photo pose.
+        for segment in trajectory.segments:
+            await asyncio.to_thread(self._send_segment, segment)
+
+    async def move_to(self, pose: str) -> None:
+        await self.preflight()
+        self.moves.append(pose)
+        await self._execute(self.trajectory_for(pose))
+
+    async def sweep(self, pose: str, shoot: ShotCallback, target_count: int = 40) -> None:
+        await self.preflight()
+        trajectory = self.trajectory_for(pose, target_count)
+        capture_count = sum(segment.kind == "dwell" for segment in trajectory.segments) + sum(
+            len(segment.shot_ratios) for segment in trajectory.segments
+        )
+        if capture_count != target_count:
+            raise RuntimeError(
+                f"RB-Y1 trajectory {trajectory.name}의 촬영 수가 다릅니다: "
+                f"{capture_count} != {target_count}"
+            )
+        self.moves.append(pose)
+        started_at = time.monotonic()
+        pending_shot: asyncio.Task[None] | None = None
+
+        async def trigger_shot(cue: ShotCue) -> None:
+            """Keep phone captures serial without holding the arm at a pose."""
+            nonlocal pending_shot
+            if pending_shot is not None:
+                await pending_shot
+            pending_shot = asyncio.create_task(shoot(cue))
+
+        try:
+            # Fire from the actual completed command sequence instead of a
+            # wall-clock schedule.  At high speed, accumulated RPC latency can
+            # otherwise move later shots outside their stopped dwell windows.
+            for segment in trajectory.segments:
+                segment_started = time.monotonic()
+                execution = asyncio.create_task(asyncio.to_thread(self._send_segment, segment))
+                if segment.kind == "dwell":
+                    await trigger_shot(
+                        ShotCue(
+                            at_seconds=time.monotonic() - started_at,
+                            waypoint=segment.label or None,
+                        )
+                    )
+                for shot_index, ratio in enumerate(segment.shot_ratios, start=1):
+                    delay = segment_started + segment.duration_s * ratio - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    await trigger_shot(
+                        ShotCue(
+                            at_seconds=time.monotonic() - started_at,
+                            waypoint=f"{segment.label}:moving-{shot_index}",
+                        )
+                    )
+                await execution
+            if pending_shot is not None:
+                await pending_shot
+        except Exception:
+            # Canceling the await does not imply a physical stop.  Ask the SDK
+            # to cancel its current control stream, then surface the failure.
+            if self._robot is not None:
+                await asyncio.to_thread(self._robot.cancel_control)
+            if "execution" in locals():
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+            if pending_shot is not None:
+                pending_shot.cancel()
+                await asyncio.gather(pending_shot, return_exceptions=True)
+            raise
+
+    def close(self) -> None:
+        if self._robot is not None and hasattr(self._robot, "disconnect"):
+            self._robot.disconnect()
+        self._robot = None
+        self._sdk = None
 
 
 class PhorceRobot:

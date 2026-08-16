@@ -20,7 +20,7 @@
     "화면에 표시된 곳으로 움직여주세요.",
     "여러 개 찍겠습니다. 자연스럽게 포즈를 취해주세요!",
     "짜잔, 이렇게 나왔어요!",
-    "마음에 드시나요?",
+    "QR로 사진을 받아가세요.",
     "즐거운 시간 되셨길 바라요. 안녕히 가세요!",
   ];
   const stageTitles = [
@@ -28,9 +28,9 @@
     "가까이 온 사람을 발견",
     "촬영 여부와 구도 선택",
     "촬영 위치 안내",
-    "세 가지 구도로 촬영",
+    "여러 구도로 연속 촬영",
     "촬영 결과 빠른 미리보기",
-    "반응과 선택을 기다리는 중",
+    "사진 전달 후 자동 종료 대기",
     "사진 전달 후 인사",
   ];
   const faceMoods = [
@@ -40,7 +40,7 @@
     ["mood-excited", "약간 신나하는 얼굴", "좋아요, 시작해볼까요?"],
     ["mood-wink", "촬영할 때마다 윙크하는 얼굴", "촬영 준비 중"],
     ["mood-curious", "결과가 궁금한 얼굴", "어떻게 나왔을까요?"],
-    ["mood-waiting", "반응을 기다리는 얼굴", "마음에 드시나요?"],
+    ["mood-waiting", "사진 전달을 기다리는 얼굴", "사진을 받아가세요"],
     ["mood-happy", "밝게 웃으며 인사하는 얼굴", "다음에 또 만나요"],
   ];
   const DEFAULT_TEMPLATE = "full_body";
@@ -60,7 +60,7 @@
 
   let stage = 1;
   let workflowState = "booting";
-  let context = {state: "booting", template_id: null, photos: [], hint: "", error: "", greeting_line: null, countdown: null, awaiting_ready: false, photo_target: 0, gallery_url: "", framing_message: "사람을 기다리는 중", framing_direction: "detect", framing_scale: 0, framing_inside: 0, framing_required: 0, framing_positioned: false, revision: 0};
+  let context = {state: "booting", template_id: null, photos: [], hint: "", error: "", greeting_line: null, countdown: null, awaiting_ready: false, photo_target: 0, gallery_url: "", framing_message: "사람을 기다리는 중", framing_direction: "detect", framing_scale: 0, framing_inside: 0, framing_required: 0, framing_positioned: false, gesture_choice: "", gesture_progress: 0, revision: 0};
   let stageTimer = null;
   let effectTimer = null;
   let effectTimeout = null;
@@ -71,7 +71,9 @@
   let speechUnlocked = false;
   let voiceRequest = 0;
   let countdownVoicePlayed = false;
-  const voicePlayer = page === "face" ? new Audio() : null;
+  const hasFace = page === "face" || page === "standby";
+  const hasGuide = page === "guide" || page === "standby";
+  const voicePlayer = hasFace ? new Audio() : null;
   const shutterPlayer = new Audio();
   // A near-zero-length silent clip so the first-gesture unlock (below) has
   // something to play immediately, even before the real shutter sound has
@@ -85,7 +87,7 @@
   document.body.classList.toggle("debug-mode", debugMode);
 
   function speechAvailable() {
-    return page === "face" && voicePlayer !== null;
+    return hasFace && voicePlayer !== null;
   }
 
   // Recorded camera-shutter click. Played through a plain <audio> element —
@@ -281,7 +283,7 @@
   }
 
   function showUnlockBanner() {
-    if (page !== "face" || !speechAvailable() || speechMuted) return;
+    if (!hasFace || !speechAvailable() || speechMuted) return;
     ensureUnlockBanner().hidden = false;
   }
 
@@ -316,7 +318,7 @@
   }
 
   function setupSpeech() {
-    if (page !== "face") return;
+    if (!hasFace) return;
     try {
       speechMuted = window.localStorage.getItem(speechMuteKey) === "true";
     } catch (error) {
@@ -395,8 +397,8 @@
     clearEffects();
     stage = nextStage;
     $("#caption").textContent = currentCaption();
-    if (page === "face") renderFace();
-    if (page === "guide") renderGuide();
+    if (hasFace) renderFace();
+    if (hasGuide) renderGuide();
   }
 
   function renderFace() {
@@ -471,12 +473,14 @@
       playShutterSound();
     }
 
-    if (page === "guide" && workflowState === "capturing" && count > previous.photos.length) {
+    if (hasGuide && workflowState === "capturing" && count > previous.photos.length) {
       flashCapturedPhoto(context.photos[count - 1]);
     }
 
-    if (page === "face" && workflowState === "capturing") {
-      $("#face-note").textContent = count ? `찰칵 · ${String(count).padStart(2, "0")} / 03` : "촬영 준비 중";
+    if (hasFace && workflowState === "capturing") {
+      $("#face-note").textContent = count
+        ? `찰칵 · ${String(count).padStart(2, "0")} / ${String(total).padStart(2, "0")}`
+        : "촬영 준비 중";
       if (count > previous.photos.length) {
         const face = $("#face");
         window.clearTimeout(effectTimeout);
@@ -519,7 +523,7 @@
   }
 
   function updateFramingGuide() {
-    if (page !== "guide") return;
+    if (!hasGuide) return;
     const arrows = {forward: "↑", back: "↓", left: "←", right: "→", hold: "✓", align: "◎", detect: "◇"};
     const instruction = $("#framing-instruction");
     const arrow = $("#framing-arrow");
@@ -604,13 +608,14 @@
   }
 
   function updateData(previous) {
-    if (page === "guide") {
+    if (hasGuide) {
       updateCountdown();
       updateReadyOverlay();
       updateFramingGuide();
+      updateGestureChoice();
     }
     if (workflowState === "capturing") updateCaptureData(previous);
-    if (workflowState === "previewing" && page === "guide") syncSlideshowPhotos();
+    if (workflowState === "previewing" && hasGuide) syncSlideshowPhotos();
     // The VLM line usually lands a second or two after the greeting caption
     // was already shown from the static list — swap it in live when it does.
     if (context.greeting_line && context.greeting_line !== previous.greeting_line) {
@@ -621,10 +626,18 @@
     }
     // The prerecorded countdown already contains 3→2→1, so trigger it only
     // once when the backend starts the countdown instead of on every tick.
-    if (workflowState === "capturing" && page === "face" && context.countdown === 3 && !countdownVoicePlayed) {
+    if (workflowState === "capturing" && hasFace && context.countdown === 3 && !countdownVoicePlayed) {
       countdownVoicePlayed = true;
       playVoice(countdownVoiceFile);
     }
+  }
+
+  function updateGestureChoice() {
+    $$(".shot-choice").forEach((button) => {
+      const active = workflowState === "deciding" && button.dataset.template === context.gesture_choice;
+      button.classList.toggle("gesture-active", active);
+      button.style.setProperty("--gesture-progress", active ? context.gesture_progress : 0);
+    });
   }
 
   function ensureFeedback() {
@@ -739,6 +752,8 @@
       framing_inside: Number(snapshot.framing_inside) || 0,
       framing_required: Number(snapshot.framing_required) || 0,
       framing_positioned: Boolean(snapshot.framing_positioned),
+      gesture_choice: snapshot.gesture_choice || "",
+      gesture_progress: Math.max(0, Math.min(1, Number(snapshot.gesture_progress) || 0)),
       revision: Number.isFinite(snapshot.revision) ? snapshot.revision : 0,
     };
     const stateChanged = next.state !== workflowState;
@@ -750,7 +765,7 @@
         if (workflowState === "deciding") carouselIndex = 0;
         if (workflowState === "capturing") countdownVoicePlayed = false;
         enterStage(stateToStage[workflowState]);
-        if (page === "face") playStageVoice();
+        if (hasFace) playStageVoice();
       }
       updateData(previous);
       setConnectionChip("online");
@@ -760,7 +775,7 @@
     } else if (workflowState === "error") {
       setConnectionChip("error");
     }
-    if (stateChanged && !stateToStage[workflowState] && page === "face") cancelSpeech();
+    if (stateChanged && !stateToStage[workflowState] && hasFace) cancelSpeech();
     updateErrorOverlay();
     updateControls();
   }

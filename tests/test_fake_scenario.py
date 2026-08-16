@@ -62,6 +62,47 @@ class FakeScenarioTests(unittest.IsolatedAsyncioTestCase):
         await self.coordinator.emit(EventType.DECLINED)
         await self.coordinator.wait_for_state(State.WAITING)
 
+    async def test_left_hand_hold_selects_full_body(self) -> None:
+        self.coordinator.context.state = State.DECIDING
+        self.coordinator.gesture_hold_seconds = 0.01
+        signal = PersonSignal(
+            detected=True,
+            people_count=1,
+            hand_raised=True,
+            left_hand_raised=True,
+        )
+        await self.coordinator._handle_choice_gesture(signal)
+        self.coordinator._choice_gesture_started_at -= 0.02
+        await self.coordinator._handle_choice_gesture(signal)
+        await self.coordinator.wait_for_state(State.GUIDING)
+        self.assertEqual(self.coordinator.context.template_id, "full_body")
+
+    async def test_two_people_or_both_hands_do_not_select(self) -> None:
+        self.coordinator.context.state = State.DECIDING
+        for signal in (
+            PersonSignal(detected=True, people_count=2, left_hand_raised=True),
+            PersonSignal(
+                detected=True,
+                people_count=1,
+                left_hand_raised=True,
+                right_hand_raised=True,
+            ),
+        ):
+            await self.coordinator._handle_choice_gesture(signal)
+            self.assertEqual(self.coordinator.context.gesture_choice, "")
+        self.assertEqual(self.coordinator.context.state, State.DECIDING)
+
+    async def test_asking_automatically_finishes_after_timeout(self) -> None:
+        self.coordinator.asking_seconds = 0.02
+        await self.coordinator.emit(EventType.PERSON_APPROACHED)
+        await self.coordinator.wait_for_state(State.DECIDING)
+        await self.coordinator.emit(EventType.CAPTURE_STARTED, template_id="full_body")
+        await self.coordinator.wait_for_state(State.GUIDING)
+        await self.coordinator.emit(EventType.POSITION_REACHED)
+        await self.coordinator.wait_for_state(State.ASKING)
+        await self.coordinator.wait_for_state(State.WAITING, timeout=1.0)
+        self.assertEqual(self.coordinator.context.photos, [])
+
     async def test_capture_failure_moves_to_error_and_resets(self) -> None:
         class FailingCapture:
             async def capture(self):
